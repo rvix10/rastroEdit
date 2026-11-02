@@ -1,5 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
-//   node tests/smoke.cjs
+//   node tests/smoke.cjs                 todo
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tactil, 2puntos, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -134,6 +135,8 @@ function serve() {
 }
 
 let failed = 0;
+const ONLY = process.argv.slice(2);
+const run = name => !ONLY.length || ONLY.includes(name);
 function check(ok, msg) {
   console.log((ok ? '  ok   ' : '  FALLA ') + msg);
   if (!ok) failed++;
@@ -154,7 +157,7 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
   const url = `http://localhost:${srv.address().port}/`;
   const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 
-  for (const width of [1280, 390]) {
+  for (const width of run('basico') ? [1280, 390] : []) {
     console.log(`\nVista de ${width} px`);
     const page = await browser.newPage({ viewport: { width, height: 820 } });
     const errs = [];
@@ -415,52 +418,268 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     await page.close();
   }
 
-  // Otro equipo: navegador sin datos guardados abre el .rastro
-  console.log('\nOtro navegador (sin datos)');
-  {
-    const ctx = await browser.newContext();
+  // Otro equipo: navegador sin datos guardados abre el .rastro (necesita el .rastro de la sección básica)
+  if (run('basico')) {
+    console.log('\nOtro navegador (sin datos)');
+    {
+      const ctx = await browser.newContext();
+      const page = await ctx.newPage();
+      const errs = [];
+      page.on('pageerror', e => errs.push(e.message));
+      await page.goto(url);
+      await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+      await page.click('[data-tab="projects"]');
+      await page.setInputFiles('#rastroIn', path.join(__dirname, 'fixtures', 'smoke.rastro'));
+      const ok = await until(
+        page,
+        async () => {
+          const { S } = await import('/js/state.js');
+          const c = S.clips[0];
+          return S.clips.length === 1 && c.kind === 'video' && !c.missing && c.el && c.el.readyState >= 2;
+        },
+        null,
+        15000
+      );
+      if (!ok)
+        console.log(
+          await page.evaluate(async () => {
+            const { S } = await import('/js/state.js');
+            const { P } = await import('/js/project.js');
+            return JSON.stringify({
+              clips: S.clips.map(c => [c.kind, c.missing, c.el && c.el.readyState]),
+              tracking: S.tracking,
+              file: P.file,
+              toast: document.querySelector('#toast').textContent,
+            });
+          })
+        );
+      check(ok, 'abre el .rastro con su video');
+      await page.reload();
+      const kept = await until(
+        page,
+        async () => {
+          const { S } = await import('/js/state.js');
+          return S.clips.length === 1 && S.clips[0].el && !S.clips[0].missing;
+        },
+        null,
+        15000
+      );
+      check(kept, 'tras recargar, el proyecto y el video siguen guardados');
+      check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
+      await ctx.close();
+    }
+  }
+
+  // Línea de tiempo táctil: gestos con mouse y con dedos reales (eventos táctiles del protocolo de Chrome)
+  if (run('tactil')) {
+    console.log('\nLínea de tiempo táctil');
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, hasTouch: true });
     const page = await ctx.newPage();
     const errs = [];
     page.on('pageerror', e => errs.push(e.message));
+    page.on('console', m => m.type() === 'error' && errs.push(m.text()));
     await page.goto(url);
-    await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
-    await page.click('[data-tab="projects"]');
-    await page.setInputFiles('#rastroIn', path.join(__dirname, 'fixtures', 'smoke.rastro'));
-    const ok = await until(
-      page,
-      async () => {
+    await until(page, async () => {
+      const { S } = await import('/js/state.js');
+      return S.clips.length === 3 && !S.tracking;
+    });
+    const cdp = await ctx.newCDPSession(page);
+    const touch = (type, ps) =>
+      cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ps.map((q, i) => ({ x: q.x, y: q.y, id: i })) });
+    const wait = ms => page.waitForTimeout(ms);
+    const state = () =>
+      page.evaluate(async () => {
         const { S } = await import('/js/state.js');
-        const c = S.clips[0];
-        return S.clips.length === 1 && c.kind === 'video' && !c.missing && c.el && c.el.readyState >= 2;
-      },
-      null,
-      15000
-    );
-    if (!ok)
-      console.log(
-        await page.evaluate(async () => {
-          const { S } = await import('/js/state.js');
-          const { P } = await import('/js/project.js');
-          return JSON.stringify({
-            clips: S.clips.map(c => [c.kind, c.missing, c.el && c.el.readyState]),
-            tracking: S.tracking,
-            file: P.file,
-            toast: document.querySelector('#toast').textContent,
-          });
-        })
-      );
-    check(ok, 'abre el .rastro con su video');
-    await page.reload();
-    const kept = await until(
-      page,
-      async () => {
+        return {
+          order: S.clips.map(c => c.name),
+          sel: (S.clips.find(c => c.id === S.sel) || {}).name,
+          pps: S.pps,
+          T: S.T,
+          tab: S.tab,
+          sl: document.querySelector('#tlScroll').scrollLeft,
+          clips: Object.fromEntries(S.clips.map(c => [c.name, { in: c.in, out: c.out }])),
+        };
+      });
+    const zoom = pps => page.evaluate(async p => (await import('/js/timeline-touch.js')).zoomAt(p, 640), pps);
+    // Caja del clip en pantalla (antes lo desplaza para que se vea)
+    const clipBox = name =>
+      page.evaluate(async n => {
         const { S } = await import('/js/state.js');
-        return S.clips.length === 1 && S.clips[0].el && !S.clips[0].missing;
-      },
-      null,
-      15000
+        const e = document.querySelector(`.clip[data-id="${S.clips.find(k => k.name === n).id}"]`);
+        e.scrollIntoView({ inline: 'center', block: 'nearest' });
+        const r = e.getBoundingClientRect();
+        return { x: r.x, y: r.y + 30, w: r.width, cx: r.x + r.width / 2 };
+      }, name);
+    const drag = async (from, to, steps = 8) => {
+      for (let i = 1; i <= steps; i++) {
+        await touch('touchMove', [{ x: from.x + ((to.x - from.x) * i) / steps, y: from.y }]);
+        await wait(16);
+      }
+    };
+
+    // Mouse: arrastrar un clip lo reordena
+    await zoom(40);
+    let a = await clipBox('Avenida'),
+      l = await clipBox('Lago');
+    await page.mouse.move(a.cx, a.y);
+    await page.mouse.down();
+    await page.mouse.move(l.x + l.w - 5, a.y, { steps: 8 });
+    await page.mouse.up();
+    await wait(150);
+    let st0 = await state();
+    check(st0.order.join() === 'Cancha,Lago,Avenida', 'mouse: arrastrar un clip lo reordena');
+
+    // Dedo: deslizar sobre un clip desplaza (no reordena)
+    await zoom(160);
+    a = await clipBox('Cancha');
+    const before = await state();
+    await touch('touchStart', [{ x: 700, y: a.y }]);
+    await drag({ x: 700, y: a.y }, { x: 520, y: a.y }, 6);
+    await touch('touchEnd', []);
+    await wait(500);
+    const after = await state();
+    check(
+      after.sl > before.sl + 150 && after.order.join() === before.order.join(),
+      `dedo: deslizar desplaza la línea de tiempo (${before.sl} → ${after.sl} px)`
     );
-    check(kept, 'tras recargar, el proyecto y el video siguen guardados');
+
+    // Dedo: mantener presionado y arrastrar reordena
+    await zoom(40);
+    a = await clipBox('Cancha');
+    const end = await clipBox('Avenida');
+    await touch('touchStart', [{ x: a.cx, y: a.y }]);
+    await wait(450);
+    const lifted = await page.evaluate(() => !!document.querySelector('.clip.lift'));
+    await drag({ x: a.cx, y: a.y }, { x: end.x + end.w - 8, y: a.y }, 10);
+    await touch('touchEnd', []);
+    await wait(150);
+    check(
+      lifted && (await state()).order.join() === 'Lago,Avenida,Cancha',
+      'dedo: mantener presionado y arrastrar reordena'
+    );
+
+    // Dedo: tocar selecciona; los bordes del seleccionado recortan
+    await zoom(80);
+    a = await clipBox('Avenida');
+    await touch('touchStart', [{ x: a.cx, y: a.y }]);
+    await wait(60);
+    await touch('touchEnd', []);
+    await wait(150);
+    check((await state()).sel === 'Avenida', 'dedo: tocar un clip lo selecciona');
+    const handle = side =>
+      page.evaluate(sd => {
+        const r = document.querySelector('.clip.sel .th.' + sd).getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }, side);
+    let h = await handle('r');
+    await touch('touchStart', [h]);
+    await drag(h, { x: h.x - 80, y: h.y });
+    await wait(50); // Chrome agrupa los movimientos por cuadro
+    const tip = await page.evaluate(() => (document.querySelector('.trim-tip') || {}).textContent);
+    await touch('touchEnd', []);
+    await wait(150);
+    h = await handle('l');
+    await page.mouse.move(h.x, h.y);
+    await page.mouse.down();
+    await page.mouse.move(h.x + 40, h.y, { steps: 5 });
+    await page.mouse.up();
+    await wait(150);
+    const tr = (await state()).clips.Avenida;
+    check(
+      Math.abs(tr.out - 3) < 0.05 && Math.abs(tr.in - 0.5) < 0.05 && tip === '3,0 s',
+      `recortar con los bordes (fin −1 s con el dedo, inicio +0,5 s con mouse: ${tr.in.toFixed(2)}–${tr.out.toFixed(2)} s, etiqueta ${tip})`
+    );
+    await page.evaluate(async () => {
+      const pj = await import('/js/project.js');
+      pj.undo();
+      pj.undo();
+    });
+    const un = (await state()).clips.Avenida;
+    check(un.in === 0 && un.out === 4, 'deshacer revierte los recortes');
+
+    // Arrastrar un borde hasta el filo: la línea de tiempo se desplaza sola y el recorte sigue avanzando
+    const ed = await page.evaluate(async () => {
+      const { S } = await import('/js/state.js'),
+        tl = await import('/js/timeline-touch.js'),
+        ui = await import('/js/timeline-ui.js');
+      const c = S.clips.find(k => k.name === 'Avenida');
+      c.out = 1;
+      S.sel = c.id;
+      tl.zoomAt(200, 640);
+      ui.renderTimeline();
+      document.querySelector('.clip.sel').scrollIntoView({ inline: 'start', block: 'nearest' });
+      const h = document.querySelector('.clip.sel .th.r').getBoundingClientRect();
+      return {
+        x: h.x + h.width / 2,
+        y: h.y + h.height / 2,
+        right: document.querySelector('#tlScroll').getBoundingClientRect().right,
+        sl: document.querySelector('#tlScroll').scrollLeft,
+      };
+    });
+    await page.mouse.move(ed.x, ed.y);
+    await page.mouse.down();
+    await page.mouse.move(ed.right - 10, ed.y, { steps: 10 });
+    await wait(400);
+    const sl1 = await page.evaluate(() => document.querySelector('#tlScroll').scrollLeft);
+    await page.mouse.up();
+    await wait(100);
+    const outE = (await state()).clips.Avenida.out,
+      wantE = Math.min(4, 1 + (ed.right - 10 - ed.x + sl1 - ed.sl) / 200);
+    check(
+      sl1 > ed.sl && Math.abs(outE - wantE) < 0.03,
+      `recortar hasta el borde desplaza y sigue (${outE.toFixed(2)} s, esperado ${wantE.toFixed(2)} s)`
+    );
+    await page.evaluate(async () => (await import('/js/project.js')).undo());
+
+    await zoom(40);
+    const cx = await page.evaluate(() => document.querySelector('#tlInner').getBoundingClientRect().left + 12 + 6 * 40);
+    const yy = a.y;
+    await touch('touchStart', [
+      { x: cx - 50, y: yy },
+      { x: cx + 50, y: yy },
+    ]);
+    for (let i = 1; i <= 8; i++) {
+      await touch('touchMove', [
+        { x: cx - 50 - i * 12.5, y: yy },
+        { x: cx + 50 + i * 12.5, y: yy },
+      ]);
+      await wait(16);
+    }
+    await touch('touchEnd', []);
+    await wait(150);
+    const pz = await page.evaluate(async x => {
+      const { S } = await import('/js/state.js');
+      return { pps: S.pps, t: (x - document.querySelector('#tlInner').getBoundingClientRect().left - 12) / S.pps };
+    }, cx);
+    check(
+      Math.abs(pz.pps - 120) < 3 && Math.abs(pz.t - 6) < 0.15,
+      `dos dedos: zoom ×3 sin perder el punto (${pz.t.toFixed(2)} s bajo los dedos)`
+    );
+
+    // Dedo en la regla mueve el cursor; tocar una transición la abre
+    const rr = await page.evaluate(() => {
+      const r = document.querySelector('#ruler').getBoundingClientRect(),
+        q = document.querySelector('#tlScroll').getBoundingClientRect();
+      return { x: q.x + 400, y: r.y + r.height / 2, inner: r.x };
+    });
+    await touch('touchStart', [{ x: rr.x - 100, y: rr.y }]);
+    await touch('touchMove', [{ x: rr.x, y: rr.y }]);
+    await touch('touchEnd', []);
+    await wait(100);
+    const sT = await state();
+    check(Math.abs(sT.T - (rr.x - rr.inner - 12) / sT.pps) < 0.02, 'dedo en la regla: mueve el cursor de tiempo');
+    const tb = await page.evaluate(() => {
+      const e = document.querySelector('.tbtn');
+      e.scrollIntoView({ inline: 'center', block: 'nearest' });
+      const r = e.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await touch('touchStart', [tb]);
+    await wait(60);
+    await touch('touchEnd', []);
+    await wait(150);
+    const stT = await state();
+    check(stT.tab === 'trans', 'tocar una transición la abre' + (stT.tab === 'trans' ? '' : ` (pestaña: ${stT.tab})`));
     check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
     await ctx.close();
   }
@@ -468,7 +687,7 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
   const extra = ensureExtra();
 
   // Rastreo de 2 puntos: giro y escala, desde la interfaz
-  if (extra['rotscale.webm']) {
+  if (run('2puntos') && extra['rotscale.webm']) {
     console.log('\nRastreo de 2 puntos (objeto que gira y crece)');
     const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
     const errs = [];
@@ -596,7 +815,7 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
   }
 
   // Rotación de videos de celular: lo que dibuja el decodificador = lo que muestra <video>
-  if (extra['rot90.mp4']) {
+  if (run('rotacion') && extra['rot90.mp4']) {
     console.log('\nVideo girado (rotación en el archivo)');
     const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
     await page.goto(url);
@@ -659,29 +878,31 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
   }
 
   // Demuxer contra ffprobe: muestras, tiempos (con cuadros B), tamaños, keyframes y posiciones
-  console.log('\nDemuxer (contra ffprobe)');
-  const { demux } = await import(require('url').pathToFileURL(path.join(ROOT, 'js', 'demux.js')));
-  for (const f of [FIX, ...Object.values(extra)]) {
-    const r = await demux(new Blob([fs.readFileSync(f)]));
-    const pk = ffprobePackets(f),
-      webm = /\.webm$/.test(f);
-    let bad = 0;
-    pk.forEach(([pts, size, pos, flags], i) => {
-      const s = r && r.samples[i];
-      // En WebM, ffprobe da la posición del bloque y el demuxer la del cuadro (4 bytes después)
-      if (
-        !s ||
-        Math.abs(s.ts / 1e6 - +pts) > 0.0011 ||
-        s.size !== +size ||
-        s.key !== flags.startsWith('K') ||
-        s.off !== +pos + (webm ? 4 : 0)
-      )
-        bad++;
-    });
-    check(
-      r && r.samples.length === pk.length && !bad,
-      `${path.basename(f)}: ${r ? r.codec + ', ' + r.samples.length + ' muestras' : 'no reconocido'}${r && r.rotation ? ', ' + r.rotation + '°' : ''}`
-    );
+  if (run('demux')) {
+    console.log('\nDemuxer (contra ffprobe)');
+    const { demux } = await import(require('url').pathToFileURL(path.join(ROOT, 'js', 'demux.js')));
+    for (const f of [FIX, ...Object.values(extra)]) {
+      const r = await demux(new Blob([fs.readFileSync(f)]));
+      const pk = ffprobePackets(f),
+        webm = /\.webm$/.test(f);
+      let bad = 0;
+      pk.forEach(([pts, size, pos, flags], i) => {
+        const s = r && r.samples[i];
+        // En WebM, ffprobe da la posición del bloque y el demuxer la del cuadro (4 bytes después)
+        if (
+          !s ||
+          Math.abs(s.ts / 1e6 - +pts) > 0.0011 ||
+          s.size !== +size ||
+          s.key !== flags.startsWith('K') ||
+          s.off !== +pos + (webm ? 4 : 0)
+        )
+          bad++;
+      });
+      check(
+        r && r.samples.length === pk.length && !bad,
+        `${path.basename(f)}: ${r ? r.codec + ', ' + r.samples.length + ' muestras' : 'no reconocido'}${r && r.rotation ? ', ' + r.rotation + '°' : ''}`
+      );
+    }
   }
 
   await browser.close();

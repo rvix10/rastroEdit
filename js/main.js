@@ -13,6 +13,7 @@ import './transitions.js';
 import './render.js';
 import './export.js';
 import './actions.js';
+import './timeline-touch.js';
 
 /* ---------- arranque ---------- */
 // Proyecto de ejemplo: se arma solo la primera vez (sin proyectos guardados).

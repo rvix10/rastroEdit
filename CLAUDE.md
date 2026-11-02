@@ -12,13 +12,16 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Módulos ES nativos: no abrir `index.html` con `file://`.
 - Verificar sintaxis: `for f in js/*.js; do node --check --input-type=module < $f; done`
 - Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
-- Prueba de humo: `node tests/smoke.cjs` — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
+- Prueba de humo: `node tests/smoke.cjs` (o solo algunas secciones: `node tests/smoke.cjs tactil 2puntos`;
+  secciones: basico, tactil, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
   del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
-  rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
+  línea de tiempo táctil (gestos con mouse y dedos reales), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
 - Para acceder al estado desde una prueba: `await import('/js/state.js')` y `await import('/js/project.js')` dentro de `page.evaluate` (mismas instancias de módulo).
+- Gestos táctiles en pruebas: `Input.dispatchTouchEvent` por CDP (`ctx.newCDPSession(page)`) con `hasTouch: true`;
+  Chrome agrupa los movimientos por cuadro, así que espera ~50 ms antes de leer el estado tras un `touchMove`.
 - `waitForFunction` con función `async` devuelve una promesa (siempre "verdadera"): hacer polling con `evaluate` en un bucle.
 - Video de prueba con objeto conocido (centro = x 110+240t, y 330+120·sin 2t en 1280×720):
   ```bash
@@ -48,7 +51,8 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `demux.js` | Índice de muestras de la pista de video de MP4/MOV y WebM/MKV (tiempos con cuadros B, rotación, listas de edición) |
 | `mp4.js` | `Mp4Muxer`: escribe el .mp4 (H.264/VP9/AV1 + AAC/Opus), `moov` al final |
 | `panel.js` | HTML del panel de herramientas por pestaña (`S.tab`) |
-| `timeline-ui.js` | Dibujo de la línea de tiempo |
+| `timeline-ui.js` | Dibujo de la línea de tiempo (clips con `data-id`; bordes de recorte `.th` en el seleccionado) |
+| `timeline-touch.js` | Gestos de la línea de tiempo: desplazar con inercia, regla, mantener y arrastrar para reordenar, bordes para recortar, dos dedos / Ctrl+rueda para zoom (`zoomAt`) |
 | `actions.js` | `act(nombre:arg)` despachado por `data-act`; eventos de puntero y teclado |
 | `store.js` | IndexedDB: `projects`, `media` (blobs de video), `meta` |
 | `project.js` | Serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer (`P`), `collectMedia()`, archivo `.rastro` |
@@ -76,6 +80,10 @@ python3 -m http.server 8080   # abrir http://localhost:8080
   da ancla (punto 1), giro y escala respecto del cuadro de la semilla. Con 2 puntos, el desplazamiento del overlay está en
   ese cuadro de referencia y también gira/escala (`followRot`/`followScale`, por defecto activos). Para mover un overlay
   usa `ovSetAbs()` (inverso de `ovPos()`), nunca sumes deltas a `o.x/o.y` a mano; `setFollow()` cambia opciones sin saltos.
+- Línea de tiempo: `.tl-inner` tiene `touch-action: none` y todos los gestos los maneja `timeline-touch.js`. Los toques
+  (sin arrastre) se resuelven al soltar llamando `act()` con el `data-act` del elemento tocado; los clicks que genera el
+  puntero dentro de la línea de tiempo se descartan (con `setPointerCapture` pueden llegar al contenedor), los de teclado no.
+  Reordenar y recortar se aplican al soltar, con un solo `commit()`.
 - UI con `data-act="accion:arg"`, `data-tab`, `data-k` (inputs). No usar `alert/confirm/prompt`: confirmaciones dentro de la página.
 - Textos de la interfaz en español, directos, desde el lado del usuario. Toast tras acciones ("Clip dividido", "Proyecto eliminado").
 - Colores siempre desde los tokens de `:root` en `css/styles.css`. Debe funcionar a 390 px de ancho sin scroll horizontal.
@@ -85,6 +93,5 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 
 1. Tracking planar de 4 esquinas (homografía) para reemplazar pantallas/letreros en perspectiva.
 2. Pista de música y volumen por clip.
-3. Arrastrar clips para reordenar y recortar desde los bordes en la línea de tiempo.
-4. Rastreo más rápido: leer los cuadros con `FrameSource` (frames.js) en vez de seek en `<video>` (hoy cada seek decodifica
+3. Rastreo más rápido: leer los cuadros con `FrameSource` (frames.js) en vez de seek en `<video>` (hoy cada seek decodifica
    desde el keyframe anterior; con GOP largo, 4 s de video tardan ~20 s en analizarse).

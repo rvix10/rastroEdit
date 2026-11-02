@@ -742,6 +742,8 @@ textarea {
   min-height: 100%;
   user-select: none;
   -webkit-user-select: none;
+  /* los gestos (desplazar, zoom, reordenar, recortar) los maneja timeline-touch.js */
+  touch-action: none;
 }
 .ruler {
   position: relative;
@@ -829,6 +831,95 @@ textarea {
   background: var(--danger);
   color: #fff;
 }
+.clip.sel {
+  cursor: grab;
+}
+.clip.lift {
+  z-index: 6;
+  cursor: grabbing;
+  opacity: 0.85;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+  outline: 2px solid var(--accent);
+}
+/* bordes para recortar el clip seleccionado */
+.th {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  z-index: 4;
+  cursor: ew-resize;
+  background: var(--accent);
+}
+.th.l {
+  left: 0;
+  border-radius: 5px 0 0 5px;
+}
+.th.r {
+  right: 0;
+  border-radius: 0 5px 5px 0;
+}
+.th::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 22px;
+  margin: -11px 0 0 -1.5px;
+  border-radius: 2px;
+  background: var(--accent-ink);
+  opacity: 0.6;
+}
+.drop {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--fg);
+  box-shadow:
+    0 0 0 3px rgba(233, 235, 241, 0.25),
+    0 0 12px rgba(233, 235, 241, 0.6);
+  z-index: 7;
+  pointer-events: none;
+}
+.trim-ghost {
+  position: absolute;
+  top: 0;
+  height: 62px;
+  box-sizing: border-box;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: 4px;
+}
+.trim-ghost.el {
+  border-left: 3px solid var(--accent);
+}
+.trim-ghost.er {
+  border-right: 3px solid var(--accent);
+}
+.trim-ghost.cut {
+  background: rgba(10, 11, 15, 0.72);
+}
+.trim-ghost.add {
+  background: repeating-linear-gradient(135deg, rgba(241, 169, 59, 0.35) 0 6px, rgba(241, 169, 59, 0.12) 6px 12px);
+  outline: 1px dashed var(--accent);
+}
+.trim-tip {
+  position: absolute;
+  top: -2px;
+  z-index: 8;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 700 11px var(--f-mono);
+  white-space: nowrap;
+}
 .tz {
   position: absolute;
   left: 0;
@@ -841,7 +932,7 @@ textarea {
 .tbtn {
   position: absolute;
   top: 19px;
-  z-index: 3;
+  z-index: 5;
   transform: translateX(-50%);
   height: 24px;
   min-width: 24px;
@@ -852,6 +943,9 @@ textarea {
   color: var(--accent-ink);
   font: 800 10px var(--f-ui);
   letter-spacing: 0.03em;
+}
+.tbtn.up {
+  top: -17px; /* sobre el filo: no tapa el nombre del clip */
 }
 .tbtn.none {
   background: var(--raise);

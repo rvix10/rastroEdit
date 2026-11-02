@@ -8,6 +8,7 @@ import { runTrack } from './tracker.js';
 import { startExport, cancelExport, saveResult } from './export.js';
 import { renderTabs, setTab, renderPanel } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
+import { zoomAt } from './timeline-touch.js';
 import {
   P,
   commit,
@@ -485,14 +486,14 @@ $('#bSplit').addEventListener('click', () => {
     commit();
   }
 });
-$('#zIn').addEventListener('click', () => {
-  S.pps = Math.min(220, S.pps * 1.35);
-  renderTimeline();
-});
-$('#zOut').addEventListener('click', () => {
-  S.pps = Math.max(18, S.pps / 1.35);
-  renderTimeline();
-});
+// Zoom con botones: alrededor del cursor de tiempo si está a la vista, si no, del centro
+const zoomBtn = k => {
+  const r = tlScroll.getBoundingClientRect(),
+    ph = tlInner.getBoundingClientRect().left + S.T * S.pps + 12;
+  zoomAt(S.pps * k, ph >= r.left && ph <= r.right ? ph : r.left + r.width / 2);
+};
+$('#zIn').addEventListener('click', () => zoomBtn(1.35));
+$('#zOut').addEventListener('click', () => zoomBtn(1 / 1.35));
 document.addEventListener('keydown', e => {
   const typing =
     /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
@@ -522,21 +523,7 @@ document.addEventListener('keydown', e => {
   if (!S.exporting) S.playing ? pause() : play();
 });
 
-/* scrub en la línea de tiempo */
-export let scrub = false;
-export const tlTime = e => (e.clientX - tlInner.getBoundingClientRect().left - 12) / S.pps;
-tlInner.addEventListener('pointerdown', e => {
-  if (S.exporting || e.target.closest('.clip,.tbtn,.ovb')) return;
-  scrub = true;
-  pause();
-  seek(tlTime(e));
-  tlInner.setPointerCapture(e.pointerId);
-});
-tlInner.addEventListener('pointermove', e => {
-  if (scrub) seek(tlTime(e));
-});
-tlInner.addEventListener('pointerup', () => (scrub = false));
-tlInner.addEventListener('pointercancel', () => (scrub = false));
+/* gestos de la línea de tiempo: timeline-touch.js */
 
 /* interacción con la vista previa */
 export const toCanvas = e => {
