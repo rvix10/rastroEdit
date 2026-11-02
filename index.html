@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <meta name="theme-color" content="#111318">
 <title>Rastro Editor</title>
 <meta name="description" content="Editor de video web con línea de tiempo, transiciones y rastreo de movimiento.">
@@ -13,6 +13,7 @@
 </head>
 <body>
 <div class="app">
+  <h1 class="sr-only">Rastro Editor: editor de video con rastreo de movimiento</h1>
   <header class="head">
     <div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg><span class="word">Rastro</span></div>
     <button class="proj" id="projBtn" data-tab="projects" aria-label="Proyectos">
@@ -28,7 +29,7 @@
   </header>
 
   <nav class="tabs" role="tablist" id="tabs"></nav>
-  <section class="panel" id="panel" aria-live="polite"></section>
+  <section class="panel" id="panel" aria-label="Herramientas"></section>
 
   <section class="stage">
     <div class="viewer" id="viewer">
@@ -50,14 +51,23 @@
       <div class="tl-inner" id="tlInner">
         <div class="ruler" id="ruler"></div>
         <div class="row clips" id="rowClips"></div>
+        <div class="row mus" id="rowMus"></div>
         <div class="row ovs" id="rowOvs"></div>
         <div class="playhead" id="ph"></div>
       </div>
     </div>
   </section>
 </div>
+<!-- Selectores de archivo fijos: el panel se redibuja y no debe perder el archivo elegido mientras el diálogo está abierto -->
+<div id="pickers" hidden>
+  <input type="file" id="fileIn" accept="video/*" multiple>
+  <input type="file" id="relinkIn" accept="video/*">
+  <input type="file" id="rastroIn" accept=".rastro,application/zip">
+  <input type="file" id="musicIn">
+</div>
 <div id="vids"></div>
 <div class="toast" id="toast" hidden></div>
+<div class="sr-only" id="srLive" role="status" aria-live="polite"></div>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>
