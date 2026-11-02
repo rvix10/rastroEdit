@@ -5,6 +5,7 @@ import { renderPanel } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
 import { P, storeMedia, commit } from './project.js';
 import { DEMOS } from './demo.js';
+import { wireMusic } from './music.js';
 
 /* ---------- clips ---------- */
 export function coverOf(c) {
@@ -120,6 +121,7 @@ export function ensureAudio() {
     }
   }
   S.clips.forEach(wireAudio);
+  wireMusic();
   if (S.ac && S.ac.state === 'suspended') S.ac.resume().catch(() => {});
 }
 

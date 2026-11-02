@@ -13,13 +13,14 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Verificar sintaxis: `for f in js/*.js; do node --check --input-type=module < $f; done`
 - Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
 - Prueba de humo: `node tests/smoke.cjs` (o solo algunas secciones: `node tests/smoke.cjs tactil 2puntos`;
-  secciones: basico, tablet, tactil, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
+  secciones: basico, tablet, tactil, audio, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
   del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
-  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
+  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
 - Para acceder al estado desde una prueba: `await import('/js/state.js')` y `await import('/js/project.js')` dentro de `page.evaluate` (mismas instancias de módulo).
+- Medir audio exportado: `ffmpeg -af pan=mono|c0=FL` (un canal; `-ac 1` suma ×√2) y Goertzel por frecuencia.
 - Gestos táctiles en pruebas: `Input.dispatchTouchEvent` por CDP (`ctx.newCDPSession(page)`) con `hasTouch: true`;
   Chrome agrupa los movimientos por cuadro, así que espera ~50 ms antes de leer el estado tras un `touchMove`.
 - `waitForFunction` con función `async` devuelve una promesa (siempre "verdadera"): hacer polling con `evaluate` en un bucle.
@@ -40,6 +41,7 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `util.js` | `clamp`, `ease`, `fmtT`, `toast`, `getSel`, `getOv`… |
 | `demo.js` | Clips de ejemplo dibujados por código (`DEMOS`) |
 | `clips.js` | Importar videos, `seekTo`, audio (WebAudio), `cloneClip` |
+| `music.js` | Música de fondo (`S.music`): `<audio>` + WebAudio en la vista previa (`syncMusic`), `mixMusic` para exportar, `musicGainAt`/`musicTime` |
 | `timeline.js` | `layout()` calcula `_start/_len/_d` (los clips se solapan en transiciones) |
 | `transitions.js` | `TR` (transiciones) y `applyFilter` |
 | `render.js` | `renderFrame(T)`: compone clips, transición, overlays y guías; `trackAt`, `trackXform`, `ovPos`/`ovSetAbs` |
@@ -73,7 +75,11 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Exportación rápida: mientras corre, `S.expFast` hace que el bucle de `playback.js` no mueva los videos ni dibuje;
   `S.expFrames` (clip → cuadro decodificado) tiene prioridad sobre `c.el` en `drawClipLayer`. Un clip cuyo archivo no se
   puede demuxar/decodificar cae a seek en su `<video>` (exacto pero lento: cada seek decodifica desde el keyframe).
-  Si cambias cómo se mezcla el audio en `syncMedia()`, cambia también `mixAudio()`.
+  Si cambias cómo se mezcla el audio en `syncMedia()`, cambia también `mixAudio()` (y la música: `syncMusic()` / `mixMusic()`).
+- Audio: cada clip tiene `vol` (0–2, sin valor = 1; también en `CLIP_KEYS`). `S.music = { mediaId, name, dur, vol, in, fadeIn,
+  fadeOut, loop }` va en `content()` y en el `.rastro` (v2); su archivo vive en `media` como los videos (`collectMedia` y
+  `loadMediaFor` lo consideran). En `hydrate()` se borran del clip los campos de `CLIP_KEYS` que no vienen en los datos,
+  para que deshacer revierta valores que vuelven a "por defecto".
 - Coordenadas: el rastreo guarda `x,y` normalizados (0–1) **en el espacio del video fuente**; `mapSrc()` los lleva al lienzo.
   Overlays con `follow:true` guardan `x,y` como **desplazamiento** respecto al punto rastreado (normalizado al lienzo).
 - Rastreo de 2 puntos: `track.seed2 = {x,y}` (mismo `t` que `seed`) y cada muestra lleva además `x2,y2`. `trackXform(c, local)`
@@ -97,6 +103,5 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 ## Pendiente (en orden propuesto)
 
 1. Tracking planar de 4 esquinas (homografía) para reemplazar pantallas/letreros en perspectiva.
-2. Pista de música y volumen por clip.
-3. Rastreo más rápido: leer los cuadros con `FrameSource` (frames.js) en vez de seek en `<video>` (hoy cada seek decodifica
+2. Rastreo más rápido: leer los cuadros con `FrameSource` (frames.js) en vez de seek en `<video>` (hoy cada seek decodifica
    desde el keyframe anterior; con GOP largo, 4 s de video tardan ~20 s en analizarse).

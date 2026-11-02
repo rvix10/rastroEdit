@@ -1,6 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
 //   node tests/smoke.cjs                 todo
-//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, 2puntos, rotacion, demux)
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, 2puntos, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -767,6 +767,194 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     check(stT.tab === 'trans', 'tocar una transición la abre' + (stT.tab === 'trans' ? '' : ` (pestaña: ${stT.tab})`));
     check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
     await ctx.close();
+  }
+
+  // Audio: volumen por clip y música de fondo (vista previa, exportación, guardado, .rastro)
+  if (run('audio')) {
+    console.log('\nAudio: volumen por clip y música de fondo');
+    // "Canción" de 3 s a 660 Hz: más corta que el video de 4 s (440 Hz), para probar la repetición
+    const MUSIC = path.join(__dirname, 'fixtures', 'music.ogg');
+    if (!fs.existsSync(MUSIC))
+      execFileSync('ffmpeg', [
+        '-loglevel',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=f=660:d=3',
+        '-c:a',
+        'libopus',
+        MUSIC,
+      ]);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+    const errs = [];
+    page.on('pageerror', e => errs.push(e.message));
+    page.on('console', m => m.type() === 'error' && errs.push(m.text()));
+    await page.goto(url);
+    await until(page, async () => {
+      const { S } = await import('/js/state.js');
+      return S.clips.length === 3 && !S.tracking;
+    });
+    await page.click('[data-tab="media"]');
+    await page.setInputFiles('#fileIn', FIX);
+    await until(page, async () => (await import('/js/state.js')).S.clips.some(c => c.kind === 'video'), null, 20000);
+    await page.evaluate(`(async () => { ${mods} ac.act('clearDemo'); })()`);
+    await page.setInputFiles('#musicIn', MUSIC);
+    check(
+      await until(
+        page,
+        async () => {
+          const { S } = await import('/js/state.js');
+          return !!(S.music && document.querySelector('#rowMus .mbar') && document.querySelector('#k-mvol'));
+        },
+        null,
+        10000
+      ),
+      'agrega música desde Medios (barra en la línea de tiempo y controles)'
+    );
+    // Ajustes desde los controles, como lo haría una persona
+    const setRange = (sel, v) =>
+      page.evaluate(
+        ([s, v]) => {
+          const e = document.querySelector(s);
+          e.value = v;
+          e.dispatchEvent(new Event('input', { bubbles: true }));
+          e.dispatchEvent(new Event('change', { bubbles: true }));
+        },
+        [sel, v]
+      );
+    await setRange('#k-mvol', 0.6);
+    await setRange('#k-mfout', 0.5);
+    await page.click('[data-tab="edit"]');
+    await setRange('#k-cvol', 0.5);
+    const cfg = await page.evaluate(`(async () => { ${mods} return { m: st.S.music, vol: st.S.clips[0].vol } })()`);
+    check(
+      cfg.vol === 0.5 && cfg.m.vol === 0.6 && cfg.m.fadeOut === 0.5 && cfg.m.loop,
+      'volumen del clip 50 %, música 60 % con salida de 0,5 s y repetición'
+    );
+
+    // Vista previa: el <audio> de la música sigue al reloj del proyecto con el volumen que corresponde
+    const live =
+      await page.evaluate(`(async () => { ${mods} const pb = await import('/js/playback.js'), mu = await import('/js/music.js');
+      pb.seek(0.5); pb.play(); await new Promise(r => setTimeout(r, 1200));
+      const r = { playing: !mu.MUS.el.paused, drift: Math.abs(mu.MUS.el.currentTime - st.S.T), gain: mu.MUS.gain ? mu.MUS.gain.gain.value : null,
+        clipGain: st.S.clips[0].gain ? st.S.clips[0].gain.gain.value : null };
+      pb.pause(); r.paused = mu.MUS.el.paused; return r })()`);
+    check(
+      live.playing &&
+        live.drift < 0.3 &&
+        live.paused &&
+        Math.abs(live.gain - 0.6) < 0.01 &&
+        Math.abs(live.clipGain - 0.5) < 0.01,
+      `vista previa: la música suena sincronizada (desfase ${(live.drift * 1000).toFixed(0)} ms) y se pausa; ganancias 0,6 y 0,5`
+    );
+
+    // Exportación rápida: se mide cada tono en el archivo exportado
+    await page.click('[data-tab="export"]');
+    await until(page, () => /MP4 · /.test(document.querySelector('.specs')?.textContent || ''), null, 5000);
+    await page.click('[data-act="export"]');
+    await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        return !!S.result && !S.exporting;
+      },
+      null,
+      60000
+    );
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="save"]')]);
+    const out = path.join(__dirname, 'fixtures', 'export-audio.mp4');
+    await dl.saveAs(out);
+    const pcm = execFileSync('ffmpeg', [
+      '-loglevel',
+      'error',
+      '-i',
+      out,
+      '-vn',
+      '-af',
+      'pan=mono|c0=FL', // solo el canal izquierdo: mezclar a mono suma ×√2
+
+      '-ar',
+      '48000',
+      '-f',
+      'f32le',
+      '-',
+    ]);
+    const a = new Float32Array(pcm.buffer, pcm.byteOffset, pcm.length / 4);
+    const amp = (f, t0, t1) => {
+      // Goertzel: amplitud de un tono puro de frecuencia f entre t0 y t1
+      const i0 = Math.round(t0 * 48000),
+        n = Math.round((t1 - t0) * 48000),
+        w = (2 * Math.PI * f) / 48000;
+      let re = 0,
+        im = 0;
+      for (let i = 0; i < n; i++) {
+        re += a[i0 + i] * Math.cos(w * i);
+        im -= a[i0 + i] * Math.sin(w * i);
+      }
+      return (2 * Math.hypot(re, im)) / n;
+    };
+    const near = (v, want) => Math.abs(v - want) / want < 0.15;
+    const m = { clip: amp(440, 1, 2), music: amp(660, 1, 2), loop: amp(660, 3.1, 3.4), fade: amp(660, 3.7, 3.9) };
+    // sine de ffmpeg: amplitud 1/8. Clip 0,125·0,5 = 0,0625; música 0,125·0,6 = 0,075; en 3,7–3,9 s la salida va de 0,6 a 0,2 del volumen
+    check(near(m.clip, 0.0625), `exportado: el clip suena al 50 % (amplitud ${m.clip.toFixed(4)}, esperada 0,0625)`);
+    check(near(m.music, 0.075), `exportado: la música suena al 60 % (amplitud ${m.music.toFixed(4)}, esperada 0,075)`);
+    check(near(m.loop, 0.075), `exportado: la música se repite después de sus 3 s (amplitud ${m.loop.toFixed(4)})`);
+    check(near(m.fade, 0.03), `exportado: fundido de salida al final (amplitud ${m.fade.toFixed(4)}, esperada 0,03)`);
+
+    // Quitar y deshacer; se conserva al recargar
+    await page.click('[data-tab="media"]');
+    await page.click('[data-act="delMusic"]');
+    const gone = await page.evaluate(
+      `(async () => { ${mods} return !st.S.music && !document.querySelector('#rowMus .mbar') })()`
+    );
+    await page.evaluate(`(async () => { ${mods} pj.undo(); })()`);
+    const back = await page.evaluate(
+      `(async () => { ${mods} const mu = await import('/js/music.js'); return !!(st.S.music && st.S.music.vol === 0.6 && mu.MUS.el) })()`
+    );
+    check(gone && back, 'quitar la música y deshacer la recupera con sus ajustes');
+    await page.evaluate(`(async () => { ${mods} await pj.saveNow(); })()`);
+    await page.reload();
+    const kept = await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js'),
+          mu = await import('/js/music.js');
+        return !!(
+          S.music &&
+          S.music.vol === 0.6 &&
+          S.music.fadeOut === 0.5 &&
+          mu.MUS.el &&
+          S.clips[0] &&
+          S.clips[0].vol === 0.5
+        );
+      },
+      null,
+      15000
+    );
+    check(kept, 'tras recargar, se conservan la música, sus ajustes y el volumen del clip');
+
+    // La limpieza de archivos no borra la música en uso; el .rastro la incluye
+    const gc =
+      await page.evaluate(`(async () => { ${mods} const db = await import('/js/store.js'), id = st.S.music.mediaId;
+      const r = await db.dbGet('media', id); await db.dbPut('media', { ...r, at: 0 }); pj.resetHistory(); await pj.collectMedia();
+      return !!(await db.dbGet('media', id)) })()`);
+    check(gc, 'la limpieza de archivos no borra la música en uso');
+    await page.click('[data-tab="projects"]');
+    const [dr] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="exportProj"]')]);
+    const rf = path.join(__dirname, 'fixtures', 'audio.rastro');
+    await dr.saveAs(rf);
+    const { unzip } = await import(require('url').pathToFileURL(path.join(ROOT, 'js', 'archive.js')));
+    const files = await unzip(new Blob([fs.readFileSync(rf)]));
+    const doc = JSON.parse(await files.get('project.json').text());
+    const mm = doc.media.find(x => x.id === doc.data.music.mediaId);
+    check(
+      doc.v === 2 && mm && files.has(mm.file) && doc.data.clips[0].vol === 0.5,
+      'el .rastro incluye la música (v2) y el volumen del clip'
+    );
+    check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
+    await page.close();
   }
 
   const extra = ensureExtra();

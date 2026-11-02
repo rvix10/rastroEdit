@@ -4,6 +4,7 @@ import { TR, FILTERS } from './transitions.js';
 import { exportInfo, cancelExport } from './export.js';
 import { act } from './actions.js';
 import { P, refreshList } from './project.js';
+import { MUSIC_ACCEPT } from './music.js';
 
 /* ---------- UI: pestañas ---------- */
 export const TABS = [
@@ -70,7 +71,8 @@ export function renderPanel() {
     ${S.clips.length ? `<ul class="clist">${S.clips.map(k => `<li data-act="selclip:${k.id}" class="${k.id === S.sel ? 'sel' : ''}"><img src="${k.thumb}" alt=""><div><b>${esc(k.name)}</b><span>${fmtS(k.out - k.in)} · ${k.sw}×${k.sh}</span></div>${k.kind === 'demo' ? '<span class="tag">Ejemplo</span>' : k.missing ? `<button class="tag miss" data-act="relink:${k.id}">Vincular</button>` : ''}</li>`).join('')}</ul>` : '<p class="empty">Aún no hay clips. Importa tus videos para empezar.</p>'}
     ${S.clips.some(k => k.missing) ? '<p class="stat warn">Algunos videos no están guardados en este navegador. Toca <b>Vincular</b> y elige el mismo archivo para recuperarlos.</p>' : ''}
     <input type="file" id="relinkIn" accept="video/*" hidden>
-    ${S.clips.some(k => k.kind === 'demo') ? '<button data-act="clearDemo">Quitar clips de ejemplo</button>' : ''}`;
+    ${S.clips.some(k => k.kind === 'demo') ? '<button data-act="clearDemo">Quitar clips de ejemplo</button>' : ''}
+    ${musicPanel()}`;
   } else if (S.tab === 'projects') h = projectsPanel();
   else if (S.tab === 'edit') {
     if (!c) h = '<h2>Editar clip</h2>' + needClip();
@@ -80,6 +82,12 @@ export function renderPanel() {
     <div class="lbl">Recorte</div>
     <div class="field"><span>Inicio</span><input type="range" id="k-in" data-k="in" min="0" max="${c.dur.toFixed(2)}" step="0.05" value="${c.in}"><output id="o-in">${fmtS(c.in)}</output></div>
     <div class="field"><span>Final</span><input type="range" id="k-out" data-k="out" min="0" max="${c.dur.toFixed(2)}" step="0.05" value="${c.out}"><output id="o-out">${fmtS(c.out)}</output></div>
+    ${
+      c.kind === 'video'
+        ? `<div class="lbl">Audio del clip</div>
+    <div class="field"><span>Volumen</span><input type="range" id="k-cvol" data-k="cvol" min="0" max="2" step="0.05" value="${c.vol ?? 1}" ${c.mute ? 'disabled' : ''} aria-label="Volumen del clip"><output id="o-cvol">${c.mute ? 'Silencio' : Math.round((c.vol ?? 1) * 100) + ' %'}</output></div>`
+        : ''
+    }
     <div class="lbl">Filtro de color</div>
     <div class="chips">${Object.entries(FILTERS)
       .map(([k, n]) => `<button data-act="filter:${k}" aria-pressed="${c.filter === k}">${n}</button>`)
@@ -266,6 +274,25 @@ const mb = b =>
     : Math.max(0.1, b / 1048576)
         .toFixed(1)
         .replace('.', ',') + ' MB';
+// Música de fondo (pestaña Medios)
+function musicPanel() {
+  const m = S.music;
+  const pick = (label, cls) =>
+    `<label class="btn file${cls ? ' ' + cls : ''}"><input type="file" id="musicIn" accept="${MUSIC_ACCEPT}" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>${label}</label>`;
+  if (!m)
+    return `<div class="lbl">Música de fondo</div>${pick('Agregar música', '')}
+    <p class="note">Suena durante todo el proyecto, debajo del audio de los clips. MP3, M4A, WAV u OGG.</p>`;
+  const pct = v => Math.round(v * 100) + ' %';
+  return `<div class="lbl">Música de fondo</div>
+    <div class="music-card"><b>♪ ${esc(m.name)}</b><span>${fmtS(m.dur)}</span></div>
+    ${m.missing ? `<p class="stat warn">El archivo de música no está guardado en este navegador. Elige el mismo archivo para recuperarlo.</p>${pick('Vincular música', 'primary')}` : ''}
+    <div class="field"><span>Volumen</span><input type="range" id="k-mvol" data-k="mvol" min="0" max="1.5" step="0.05" value="${m.vol}" aria-label="Volumen de la música"><output id="o-mvol">${pct(m.vol)}</output></div>
+    <div class="field"><span>Empieza en</span><input type="range" id="k-min" data-k="min" min="0" max="${Math.max(0, m.dur - 1).toFixed(2)}" step="0.5" value="${m.in}" aria-label="Segundo de la canción donde empieza"><output id="o-min">${fmtS(m.in)}</output></div>
+    <div class="field"><span>Entrada</span><input type="range" id="k-mfin" data-k="mfin" min="0" max="5" step="0.25" value="${m.fadeIn}" aria-label="Fundido de entrada"><output id="o-mfin">${fmtS(m.fadeIn)}</output></div>
+    <div class="field"><span>Salida</span><input type="range" id="k-mfout" data-k="mfout" min="0" max="5" step="0.25" value="${m.fadeOut}" aria-label="Fundido de salida"><output id="o-mfout">${fmtS(m.fadeOut)}</output></div>
+    <label class="chk"><input type="checkbox" id="k-mloop" data-k="mloop" ${m.loop ? 'checked' : ''}> Repetir si la canción es más corta que el video</label>
+    <div class="grid2">${m.missing ? '' : pick('Cambiar música', '')}<button class="danger" data-act="delMusic">Quitar música</button></div>`;
+}
 export function projectsPanel() {
   const cur = P.project;
   if (!P.ok)

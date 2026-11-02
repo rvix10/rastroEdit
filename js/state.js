@@ -10,6 +10,7 @@ export const S = {
   aspect: '16:9',
   clips: [],
   ovs: [],
+  music: null, // música de fondo (music.js)
   T: 0,
   total: 0,
   playing: false,

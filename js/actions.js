@@ -9,6 +9,7 @@ import { startExport, cancelExport, saveResult } from './export.js';
 import { renderTabs, setTab, renderPanel } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
 import { zoomAt } from './timeline-touch.js';
+import { importMusic, attachMusic } from './music.js';
 import {
   P,
   commit,
@@ -23,6 +24,7 @@ import {
   refreshList,
   exportProjectFile,
   importProjectFile,
+  storeMedia,
 } from './project.js';
 
 /* ---------- acciones ---------- */
@@ -371,6 +373,16 @@ export function act(a, el) {
         }, 4000);
       }
       break;
+    case 'delMusic':
+      S.music = null;
+      attachMusic(P.media);
+      renderTimeline();
+      renderPanel();
+      toast('Música quitada');
+      break;
+    case 'music':
+      setTab('media');
+      break;
     case 'exportProj':
       exportProjectFile();
       break;
@@ -401,6 +413,26 @@ panel.addEventListener('change', e => {
     importFiles(t.files);
     t.value = '';
     return;
+  }
+  if (t.id === 'musicIn') {
+    const f = t.files[0];
+    t.value = '';
+    if (f) {
+      const relink = !!(S.music && S.music.missing);
+      importMusic(f, storeMedia, relink).then(ok => {
+        if (!ok) return;
+        attachMusic(P.media);
+        renderTimeline();
+        renderPanel();
+        commit();
+        toast(relink ? 'Música vinculada' : 'Música agregada');
+      });
+    }
+    return;
+  }
+  if (t.dataset.k === 'mloop' && S.music) {
+    S.music.loop = t.checked;
+    renderTimeline();
   }
   if (t.id === 'rastroIn') {
     const f = t.files[0];
@@ -462,6 +494,15 @@ panel.addEventListener('input', e => {
     renderTimeline();
   } else if (k === 'ovtext' && o) {
     o.text = v;
+    renderTimeline();
+  } else if (k === 'cvol' && c) {
+    c.vol = +v;
+    $('#o-cvol').textContent = Math.round(c.vol * 100) + ' %';
+  } else if (S.music && (k === 'mvol' || k === 'min' || k === 'mfin' || k === 'mfout')) {
+    const m = S.music,
+      key = { mvol: 'vol', min: 'in', mfin: 'fadeIn', mfout: 'fadeOut' }[k];
+    m[key] = +v;
+    $('#o-' + k).textContent = k === 'mvol' ? Math.round(m.vol * 100) + ' %' : fmtS(m[key]);
     renderTimeline();
   } else if (k === 'ovsize' && o) {
     o.size = +v;

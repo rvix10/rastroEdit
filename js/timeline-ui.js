@@ -31,6 +31,21 @@ export function renderTimeline() {
     cl += `<button class="tbtn${c.trans.type === 'none' ? ' none' : ''}${up ? ' up' : ''}" data-act="seltrans:${c.id}" style="left:${(c._start + c._d / 2) * pps}px" title="Transición: ${TR[c.trans.type].n}" aria-label="Transición: ${TR[c.trans.type].n}">${TR[c.trans.type].a}</button>`;
   });
   $('#rowClips').innerHTML = cl;
+  // Música de fondo: una barra bajo los clips (se corta donde termina la canción si no se repite)
+  const m = S.music,
+    rm = $('#rowMus');
+  if (m) {
+    const len = m.loop ? S.total : Math.max(0, Math.min(S.total, m.dur - m.in));
+    // Marcas donde la canción vuelve a empezar
+    let loops = '';
+    if (m.loop && m.dur > 0)
+      for (let t = m.dur - m.in; t < S.total; t += m.dur) loops += `<i style="left:${t * pps}px"></i>`;
+    rm.innerHTML = `<div class="mbar${m.missing ? ' miss' : ''}" data-act="music" style="width:${Math.max(24, len * pps)}px" title="Música de fondo">${loops}<b>♪ ${esc(m.name)}</b><span>${m.missing ? 'FALTA' : Math.round(m.vol * 100) + ' %'}</span></div>`;
+    rm.hidden = false;
+  } else {
+    rm.innerHTML = '';
+    rm.hidden = true;
+  }
   const lanes = [];
   let oh = '';
   for (const o of S.ovs) {
@@ -62,3 +77,4 @@ export function renderTimeline() {
 }
 $('#rowClips').style.marginLeft = '12px';
 $('#rowOvs').style.marginLeft = '12px';
+$('#rowMus').style.marginLeft = '12px';

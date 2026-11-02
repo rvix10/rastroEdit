@@ -12,6 +12,7 @@ import { renderFrame } from './render.js';
 import { P } from './project.js';
 import { Mp4Muxer } from './mp4.js';
 import { FrameSource } from './frames.js';
+import { mixMusic } from './music.js';
 
 export const FPS = 30;
 const SR = 48000;
@@ -89,16 +90,30 @@ async function mixAudio(clips, total, onStep) {
     const buf = decoded.get(c.mediaId);
     if (!buf) continue;
     const src = oac.createBufferSource(),
-      g = oac.createGain();
+      g = oac.createGain(),
+      vol = c.vol ?? 1;
+    if (vol <= 0) continue;
     src.buffer = buf;
     src.connect(g).connect(oac.destination);
-    // Igual que syncMedia(): entra con ease(p) y sale con 1 − ease(p) durante cada transición
-    if (c._d > 0) g.gain.setValueCurveAtTime(up, c._start, c._d);
+    // Igual que syncMedia(): volumen del clip × ease(p) al entrar y × (1 − ease(p)) al salir de cada transición
+    g.gain.value = vol;
+    if (c._d > 0)
+      g.gain.setValueCurveAtTime(
+        up.map(x => x * vol),
+        c._start,
+        c._d
+      );
     const next = clips[i + 1];
-    if (next && next._d > 0) g.gain.setValueCurveAtTime(down, next._start, next._d);
+    if (next && next._d > 0)
+      g.gain.setValueCurveAtTime(
+        down.map(x => x * vol),
+        next._start,
+        next._d
+      );
     src.start(c._start, c.in, c._len);
     any = true;
   }
+  if (await mixMusic(oac, P.media, total)) any = true;
   return any ? await oac.startRendering() : null;
 }
 

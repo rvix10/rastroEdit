@@ -180,7 +180,7 @@ function begin(e) {
   const handle = t.closest('.th'),
     clipEl = t.closest('.clip'),
     onRuler = t.closest('.ruler'),
-    onItem = t.closest('.tbtn,.ovb');
+    onItem = t.closest('.tbtn,.ovb,.mbar');
   G = {
     id: e.pointerId,
     touch,

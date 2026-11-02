@@ -6,6 +6,7 @@ import { pause } from './playback.js';
 import { renderPanel, renderTabs } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
 import { zip, unzip } from './archive.js';
+import { musicData, attachMusic, dropMusicEl } from './music.js';
 import { toast, saveBlob } from './util.js';
 import { openDB, dbGet, dbAll, dbPut, dbDel, getMeta, setMeta, isQuota, askPersist, estimate } from './store.js';
 
@@ -28,6 +29,7 @@ const CLIP_KEYS = [
   'mute',
   'track',
   'thumb',
+  'vol', // volumen del clip (0–2); sin valor = 1
 ];
 const HISTORY_MAX = 60;
 const SAVE_DELAY = 700;
@@ -60,6 +62,7 @@ export function content() {
       return o;
     }),
     ovs: S.ovs,
+    music: musicData(),
   };
 }
 const snapshot = () => JSON.stringify(content());
@@ -107,6 +110,8 @@ function hydrate(d) {
     const c = old.get(m.id);
     if (c && c.kind === m.kind && c.mediaId === m.mediaId && c.demoKey === m.demoKey) {
       old.delete(m.id);
+      // Los campos guardados que no están en m (p. ej. vol por defecto) se quitan: si no, deshacer no los revierte
+      for (const k of CLIP_KEYS) if (!(k in m)) delete c[k];
       Object.assign(c, m, {
         trans: { ...m.trans },
         track: m.track ? JSON.parse(JSON.stringify(m.track)) : null,
@@ -119,6 +124,8 @@ function hydrate(d) {
   });
   for (const c of old.values()) dropClip(c);
   S.ovs = (d.ovs || []).map(o => ({ ...o }));
+  S.music = d.music ? { ...d.music } : null;
+  attachMusic(P.media);
   setAspect(d.aspect || '16:9');
   if (!S.clips.some(c => c.id === S.sel)) S.sel = S.clips[0] ? S.clips[0].id : null;
   if (!S.ovs.some(o => o.id === S.selOv)) S.selOv = null;
@@ -276,7 +283,7 @@ export async function storeMedia(id, blob, name, url) {
 /* --- abrir / crear / duplicar / eliminar --- */
 async function loadMediaFor(clips) {
   for (const m of clips) {
-    if (m.kind !== 'video' || !m.mediaId || P.media.has(m.mediaId)) continue;
+    if (!m || !m.mediaId || P.media.has(m.mediaId)) continue; // videos y música
     try {
       const r = await dbGet('media', m.mediaId);
       if (r && r.blob) P.media.set(m.mediaId, { url: URL.createObjectURL(r.blob), blob: r.blob });
@@ -287,6 +294,8 @@ function clearAll() {
   pause();
   for (const c of S.clips) dropClip(c);
   S.clips = [];
+  dropMusicEl();
+  S.music = null;
   S.ovs = [];
   S.sel = null;
   S.selOv = null;
@@ -314,7 +323,7 @@ export async function openProject(id) {
 /** Reemplaza el proyecto abierto por el registro dado (de IndexedDB o de un archivo .rastro). */
 async function loadRecord(rec) {
   clearAll();
-  await loadMediaFor(rec.data.clips || []);
+  await loadMediaFor([...(rec.data.clips || []), rec.data.music]);
   P.project = { id: rec.id, name: rec.name, createdAt: rec.createdAt };
   S.sel = rec.data.sel || null;
   S.pps = rec.data.pps || S.pps;
@@ -378,15 +387,15 @@ export async function deleteProject(id) {
 /** Borra los videos guardados que ya no usa ningún proyecto ni el historial de deshacer abierto.
  *  Los recién guardados se respetan un rato: otra pestaña puede estar importándolos sin haber guardado aún. */
 const MEDIA_GRACE = 10 * 60 * 1000;
-const idsIn = clips => (clips || []).map(c => c.mediaId).filter(Boolean);
+// Videos y música que usa un proyecto (data = content() o los datos guardados)
+const idsIn = d => [...((d && d.clips) || []), d && d.music].map(c => c && c.mediaId).filter(Boolean);
 export async function collectMedia() {
   if (!P.ok) return 0;
   let n = 0;
   try {
-    const used = new Set(idsIn(S.clips));
-    for (const snap of [P.snap, ...P.undo, ...P.redo])
-      if (snap) for (const id of idsIn(JSON.parse(snap).clips)) used.add(id);
-    for (const p of await dbAll('projects')) for (const id of idsIn(p.data && p.data.clips)) used.add(id);
+    const used = new Set(idsIn(content()));
+    for (const snap of [P.snap, ...P.undo, ...P.redo]) if (snap) for (const id of idsIn(JSON.parse(snap))) used.add(id);
+    for (const p of await dbAll('projects')) for (const id of idsIn(p.data)) used.add(id);
     const now = Date.now();
     for (const m of await dbAll('media')) {
       if (used.has(m.id) || (m.at && now - m.at < MEDIA_GRACE)) continue;
@@ -425,7 +434,7 @@ export async function refreshList() {
 
 /* --- archivo .rastro: el proyecto con sus videos, para moverlo entre equipos ---
    Es un zip con project.json y media/<id>.<ext>. */
-const RASTRO_V = 1;
+const RASTRO_V = 2; // 2: música de fondo y volumen por clip (los archivos v1 se leen igual)
 const extOf = (name, type) => {
   const m = /\.([a-z0-9]{2,5})$/i.exec(name || '');
   return m ? m[1].toLowerCase() : /mp4/.test(type) ? 'mp4' : /quicktime/.test(type) ? 'mov' : 'webm';
@@ -452,8 +461,9 @@ export async function exportProjectFile() {
       entries = [],
       seen = new Set();
     let missing = 0;
-    for (const c of S.clips) {
-      if (c.kind !== 'video' || !c.mediaId || seen.has(c.mediaId)) continue;
+    const sources = [...S.clips.filter(c => c.kind === 'video'), ...(S.music ? [S.music] : [])];
+    for (const c of sources) {
+      if (!c.mediaId || seen.has(c.mediaId)) continue;
       seen.add(c.mediaId);
       const md = P.media.get(c.mediaId);
       if (!md || !md.blob) {

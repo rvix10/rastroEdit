@@ -25,6 +25,7 @@ img {
   --accent-ink: #1d1406;
   --trk: #4fd1c5;
   --ov: #a68bf0;
+  --mus: #7bd88f;
   --danger: #ef6b5c;
   --clip: #2f3d63;
   --stage: #0a0b0f;
@@ -954,6 +955,71 @@ textarea {
 }
 .tbtn.none {
   background: var(--raise);
+  color: var(--muted);
+}
+.row.mus {
+  height: 26px;
+}
+.row.mus[hidden] {
+  display: none;
+}
+/* música de fondo (barra en la línea de tiempo) */
+.mbar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 24px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  border: 1px solid var(--mus);
+  background: repeating-linear-gradient(90deg, rgba(123, 216, 143, 0.22) 0 3px, rgba(123, 216, 143, 0.1) 3px 6px);
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: pointer;
+  font-size: 11px;
+}
+.mbar b {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
+}
+.mbar span {
+  font: 500 10px var(--f-mono);
+  color: var(--muted);
+  position: relative;
+}
+.mbar i {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-left: 1px dashed var(--mus);
+}
+.mbar.miss {
+  border-color: var(--danger);
+}
+.music-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--raise);
+  border-left: 3px solid var(--mus);
+  font-size: 13px;
+}
+.music-card b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.music-card span {
+  font: 500 12px var(--f-mono);
   color: var(--muted);
 }
 .row.ovs {

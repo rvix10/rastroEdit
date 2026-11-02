@@ -9,7 +9,8 @@ Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 | Área | Qué hace |
 |---|---|
 | **Medios** | Importa varios videos (MP4, WebM, MOV según el navegador). Formato del proyecto 16:9, 9:16 o 1:1. |
-| **Editar** | Recorte de inicio y fin, dividir en el cursor, duplicar, reordenar, silenciar, filtros (Cálido, Frío, B/N, Vívido, Cine). |
+| **Editar** | Recorte de inicio y fin, dividir en el cursor, duplicar, reordenar, silenciar, volumen por clip (0–200 %), filtros (Cálido, Frío, B/N, Vívido, Cine). |
+| **Música** | Música de fondo para todo el proyecto: volumen, desde qué segundo de la canción empieza, fundido de entrada y salida, y repetición si es más corta que el video. Se escucha igual en la vista previa y en el video exportado. |
 | **Tablet y celular** | En pantallas táctiles los controles miden al menos 44 px. En vertical, la vista previa y la línea de tiempo quedan fijas y solo se desplaza el panel. |
 | **Línea de tiempo táctil** | Deslizar para desplazar, dos dedos para zoom, mantener presionado un clip y arrastrarlo para reordenar, bordes del clip seleccionado para recortar (con mouse: arrastrar directo y Ctrl + rueda). |
 | **Transiciones** | Corte, Fundido, Destello, Deslizar, Empujar, Zoom, Giro, Barrido, Círculo, Desenfoque y Glitch, con duración ajustable. Los clips se superponen durante la transición y el audio hace crossfade. |
@@ -48,6 +49,7 @@ js/
   util.js         utilidades (formato de tiempo, easing, toast…)
   demo.js         clips de ejemplo generados por código
   clips.js        importación de videos, búsqueda de cuadros, audio
+  music.js        música de fondo (vista previa y exportación)
   timeline.js     cálculo de posiciones y solapes de transición
   transitions.js  transiciones y filtros de color
   render.js       composición de cada cuadro, overlays y guías
@@ -99,7 +101,7 @@ Precisión medida en pruebas: error promedio de ~2 px en el clip de ejemplo y de
 - [x] Tracking de 2 puntos (posición + rotación + escala)
 - [ ] Tracking planar de 4 esquinas (homografía) para reemplazar pantallas y letreros
 - [x] Guardar y abrir proyectos (IndexedDB)
-- [ ] Pista de música y control de volumen por clip
+- [x] Pista de música y control de volumen por clip
 - [x] Exportación más rápida que tiempo real con WebCodecs
 - [x] Deshacer / rehacer
 - [x] Exportar / importar proyecto como archivo (.rastro) para pasarlo a otro equipo

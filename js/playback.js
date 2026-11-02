@@ -6,6 +6,7 @@ import { TR } from './transitions.js';
 import { renderFrame } from './render.js';
 import { finishExport } from './export.js';
 import { act } from './actions.js';
+import { MUS, syncMusic } from './music.js';
 
 /* ---------- reproducción ---------- */
 export function syncMedia(T) {
@@ -19,7 +20,8 @@ export function syncMedia(T) {
   } else if (act.length) roles.set(act[0], 1);
   for (const c of S.clips) {
     if (!c.el || c.id === S.tracking) continue;
-    const vol = (roles.get(c) || 0) * (c.mute ? 0 : 1);
+    // Volumen del clip (0–2) por su peso en la transición; mixAudio() en fastexport.js hace lo mismo
+    const vol = (roles.get(c) || 0) * (c.mute ? 0 : (c.vol ?? 1));
     if (c.gain) c.gain.gain.value = vol;
     else {
       c.el.muted = c.mute;
@@ -38,6 +40,7 @@ export function syncMedia(T) {
       }
     } else if (!c.el.paused) c.el.pause();
   }
+  syncMusic(T);
 }
 export function play() {
   if (!S.clips.length) return;
@@ -50,6 +53,7 @@ export function play() {
 export function pause() {
   S.playing = false;
   S.clips.forEach(c => c.el && c.el.pause());
+  if (MUS.el) MUS.el.pause();
   updPlayBtn();
 }
 export function updPlayBtn() {
