@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111318">
+<title>Rastro Editor</title>
+<meta name="description" content="Editor de video web con línea de tiempo, transiciones y rastreo de movimiento.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=JetBrains+Mono:wght@500&family=Manrope:wght@400;600;700;800&family=Unbounded:wght@600;800&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="head">
+    <div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>Rastro</div>
+    <div class="proj">Proyecto · Domingo de fútbol</div>
+    <div class="sp"></div>
+    <div class="chip-time" id="hdrDur">00:00.00</div>
+  </header>
+
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <section class="panel" id="panel" aria-live="polite"></section>
+
+  <section class="stage">
+    <div class="viewer" id="viewer">
+      <canvas id="stage" width="1280" height="720" aria-label="Vista previa del proyecto"></canvas>
+      <div class="pickhint" id="pickHint" hidden>Toca el objeto que quieres rastrear</div>
+    </div>
+    <div class="transport">
+      <button id="bStart" title="Ir al inicio" aria-label="Ir al inicio"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2.5v14H6zM20 5v14L9.5 12z"/></svg></button>
+      <button id="bPlay" class="play" title="Reproducir (espacio)" aria-label="Reproducir"></button>
+      <div class="tc"><b id="tcNow">00:00.00</b> / <span id="tcTot">00:00.00</span></div>
+      <div class="sp"></div>
+      <button id="bSplit" title="Dividir el clip seleccionado en el cursor">Dividir</button>
+    </div>
+  </section>
+
+  <section class="tl">
+    <div class="tl-head"><b>Línea de tiempo</b><span id="tlInfo"></span><div class="sp"></div><button id="zOut" aria-label="Alejar">−</button><button id="zIn" aria-label="Acercar">+</button></div>
+    <div class="tl-scroll" id="tlScroll">
+      <div class="tl-inner" id="tlInner">
+        <div class="ruler" id="ruler"></div>
+        <div class="row clips" id="rowClips"></div>
+        <div class="row ovs" id="rowOvs"></div>
+        <div class="playhead" id="ph"></div>
+      </div>
+    </div>
+  </section>
+</div>
+<div id="vids"></div>
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
