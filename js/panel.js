@@ -193,7 +193,7 @@ export function renderPanel() {
       fmt = mime === null ? 'No disponible' : /mp4/.test(mime) ? 'MP4' : 'WebM';
     h = `<h2>Exportar</h2>
     <dl class="specs"><dt>Resolución</dt><dd>${S.W} × ${S.H}</dd><dt>Duración</dt><dd>${fmtT(S.total)}</dd><dt>Cuadros</dt><dd>30 fps</dd><dt>Formato</dt><dd>${fmt}</dd></dl>
-    <p class="note">La exportación reproduce el proyecto en tiempo real: tarda lo mismo que dura el video. Deja esta pestaña abierta mientras termina.</p>
+    <p class="note">La exportación reproduce el proyecto en tiempo real: tarda lo mismo que dura el video. Si cambias de pestaña, se pausa y sigue cuando vuelvas.</p>
     ${S.exporting ? `<div class="prog"><i id="expBar" style="transition:none"></i></div><button data-act="cancelExport">Detener exportación</button>` : `<button class="primary" data-act="export" ${S.clips.length && mime !== null ? '' : 'disabled'}>Exportar video</button>`}
     ${
       S.result && !S.exporting

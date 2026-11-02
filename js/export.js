@@ -73,6 +73,7 @@ export function startExport() {
 }
 export function finishExport() {
   S.exporting = false;
+  S.expHidden = false;
   try {
     S.rec.stop();
   } catch (e) {}
@@ -80,11 +81,33 @@ export function finishExport() {
 export function cancelExport() {
   S.expCancel = true;
   S.exporting = false;
+  S.expHidden = false;
   pause();
   try {
     S.rec.stop();
   } catch (e) {}
 }
+// En segundo plano el navegador deja de dibujar cuadros (requestAnimationFrame se detiene),
+// pero MediaRecorder seguiría grabando: el video saldría congelado. Se pausa todo y se retoma al volver.
+document.addEventListener('visibilitychange', () => {
+  if (!S.exporting || !S.rec) return;
+  if (document.visibilityState === 'hidden') {
+    if (S.expHidden) return;
+    S.expHidden = true;
+    pause();
+    try {
+      S.rec.pause();
+    } catch (e) {}
+  } else if (S.expHidden) {
+    S.expHidden = false;
+    try {
+      S.rec.resume();
+    } catch (e) {}
+    play();
+    toast('Exportación reanudada. Deja esta pestaña abierta hasta que termine.');
+  }
+});
+
 export async function saveResult() {
   const m = $('#saveMsg');
   if (!S.result) return;

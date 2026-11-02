@@ -44,6 +44,7 @@ export const P = {
   confirmDel: null,
   saveTimer: null,
   saving: null,
+  gcTimer: null,
 };
 
 /* --- serialización --- */
@@ -144,6 +145,9 @@ export function resetHistory() {
   P.redo.length = 0;
   P.snap = snapshot();
   updHistUI();
+  // Al descartar el historial, los videos de clips borrados ya no se pueden recuperar con deshacer
+  clearTimeout(P.gcTimer);
+  P.gcTimer = setTimeout(collectMedia, 3000);
 }
 function canEdit() {
   if (S.tracking) {
@@ -255,7 +259,7 @@ export async function storeMedia(id, blob, name, url) {
   if (!P.ok) return false;
   askPersist();
   try {
-    await dbPut('media', { id, blob, name, type: blob.type, size: blob.size });
+    await dbPut('media', { id, blob, name, type: blob.type, size: blob.size, at: Date.now() });
     return true;
   } catch (e) {
     toast(
@@ -364,19 +368,31 @@ export async function deleteProject(id) {
   refreshList();
 }
 
-/** Borra los videos guardados que ya no usa ningún proyecto. */
-async function collectMedia() {
+/** Borra los videos guardados que ya no usa ningún proyecto ni el historial de deshacer abierto.
+ *  Los recién guardados se respetan un rato: otra pestaña puede estar importándolos sin haber guardado aún. */
+const MEDIA_GRACE = 10 * 60 * 1000;
+const idsIn = clips => (clips || []).map(c => c.mediaId).filter(Boolean);
+export async function collectMedia() {
+  if (!P.ok) return 0;
+  let n = 0;
   try {
-    const used = new Set(S.clips.map(c => c.mediaId).filter(Boolean));
-    for (const p of await dbAll('projects')) for (const c of p.data.clips || []) if (c.mediaId) used.add(c.mediaId);
-    const d = await openDB();
-    const keys = await new Promise((res, rej) => {
-      const r = d.transaction('media').objectStore('media').getAllKeys();
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
-    for (const k of keys) if (!used.has(k)) await dbDel('media', k);
+    const used = new Set(idsIn(S.clips));
+    for (const snap of [P.snap, ...P.undo, ...P.redo])
+      if (snap) for (const id of idsIn(JSON.parse(snap).clips)) used.add(id);
+    for (const p of await dbAll('projects')) for (const id of idsIn(p.data && p.data.clips)) used.add(id);
+    const now = Date.now();
+    for (const m of await dbAll('media')) {
+      if (used.has(m.id) || (m.at && now - m.at < MEDIA_GRACE)) continue;
+      await dbDel('media', m.id);
+      const md = P.media.get(m.id);
+      if (md) {
+        URL.revokeObjectURL(md.url);
+        P.media.delete(m.id);
+      }
+      n++;
+    }
   } catch (e) {}
+  return n;
 }
 
 export function renameProject(name) {

@@ -100,9 +100,35 @@ export function drawMinis(now) {
   });
 }
 
+/** Tiempo del proyecto según el video que se está mostrando: un número, 'wait' si el video
+ *  se está cargando, o null si manda el reloj de la página.
+ *  El cuadro dibujado viene del <video>; si el reloj del proyecto avanzara por su cuenta,
+ *  los textos rastreados y los cortes se desfasarían de la imagen. */
+export function videoClock(T) {
+  const a = activeAt(T);
+  if (a.length !== 1) return null; // en transiciones manda el reloj de la página
+  const c = a[0],
+    el = c.el;
+  if (!el || el.paused || el.ended) return null;
+  if (el.seeking || el.readyState < 3) return 'wait';
+  const tv = c._start + el.currentTime - c.in;
+  return Math.abs(tv - T) < 1 ? tv : null;
+}
+const MAX_WAIT = 1.5; // s: si el video no responde, el proyecto sigue sin él
+
 export function loop(now) {
   if (S.playing) {
-    S.T += (now - S.last) / 1000;
+    const prev = S.T,
+      dt = (now - S.last) / 1000;
+    S.T += dt;
+    const tv = videoClock(S.T);
+    if (tv === 'wait' && S.waited < MAX_WAIT) {
+      S.T = prev;
+      S.waited += dt;
+    } else {
+      S.waited = 0;
+      if (typeof tv === 'number') S.T = Math.max(prev, tv); // si el video va atrasado, el proyecto lo espera
+    }
     if (S.T >= S.total) {
       S.T = S.total;
       if (S.exporting) finishExport();
