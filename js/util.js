@@ -29,12 +29,28 @@ export function rng(seed) {
   };
 }
 export let toastT;
-export function toast(m) {
+/**
+ * Aviso breve. Con action = { label, act } muestra un botón (p. ej. «Deshacer» → data-act="undo") y dura más.
+ * El texto también va a #srLive (región viva que siempre existe) para que lo anuncien los lectores de pantalla.
+ */
+export function toast(m, action = null) {
   const el = $('#toast');
   el.textContent = m;
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.act = action.act;
+    b.textContent = action.label;
+    el.append(' ', b);
+  }
   el.hidden = false;
   clearTimeout(toastT);
-  toastT = setTimeout(() => (el.hidden = true), 2600);
+  toastT = setTimeout(() => (el.hidden = true), action ? 5000 : 2600);
+  const live = $('#srLive');
+  if (live) {
+    live.textContent = '';
+    setTimeout(() => (live.textContent = m), 30);
+  }
 }
 export function roundRect(g, x, y, w, h, r) {
   r = Math.min(r, w / 2, h / 2);
@@ -72,6 +88,6 @@ export async function saveBlob(blob, filename) {
       ? 'Descarga cancelada.'
       : c === 'rate_limited'
         ? 'Hay otra descarga pendiente; intenta de nuevo en un momento.'
-        : 'No se pudo guardar el archivo' + (e && e.message ? ': ' + e.message : '.');
+        : 'No se pudo guardar el archivo. Prueba de nuevo; si sigue fallando, revisa el espacio libre del dispositivo.';
   }
 }

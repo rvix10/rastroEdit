@@ -57,6 +57,29 @@ export const STICKERS = ['⚽', '🔥', '⭐', '👉', '❤️', '😂', '🎯',
 export function needClip() {
   return '<p class="empty">Selecciona un clip en la línea de tiempo.</p>';
 }
+/* Primer uso: mientras está abierto el proyecto de ejemplo, una bienvenida (se cierra para siempre en este navegador) */
+const WELCOME = 'rastro.welcome';
+export function welcomeSeen() {
+  try {
+    return localStorage.getItem(WELCOME) === '1';
+  } catch (e) {
+    return false;
+  }
+}
+export function markWelcome() {
+  try {
+    localStorage.setItem(WELCOME, '1');
+  } catch (e) {}
+  S.welcomeOff = true;
+}
+function welcomeCard() {
+  if (S.welcomeOff || welcomeSeen() || !S.clips.some(k => k.kind === 'demo')) return '';
+  return `<div class="welcome" role="region" aria-label="Bienvenida">
+    <b>Este es un proyecto de ejemplo</b>
+    <p>Toca <span aria-hidden="true">▶</span> para verlo: el aro y el texto siguen al balón gracias al <b>rastreo</b>. Puedes tocar cualquier pestaña para ver cómo está hecho.</p>
+    <div class="grid2"><button class="primary" data-act="welcomeStart">Empezar mi proyecto</button><button data-act="welcomeOk">Entendido</button></div>
+  </div>`;
+}
 export function renderPanel() {
   const c = getSel(),
     o = getOv();
@@ -68,7 +91,7 @@ export function renderPanel() {
     <div class="lbl">Formato del proyecto</div>
     <div class="seg">${['16:9', '9:16', '1:1'].map(a => `<button data-act="aspect:${a}" aria-pressed="${S.aspect === a}">${a}</button>`).join('')}</div>
     <div class="lbl">Clips (${S.clips.length})</div>
-    ${S.clips.length ? `<ul class="clist">${S.clips.map(k => `<li data-act="selclip:${k.id}" class="${k.id === S.sel ? 'sel' : ''}"><img src="${k.thumb}" alt=""><div><b>${esc(k.name)}</b><span>${fmtS(k.out - k.in)} · ${k.sw}×${k.sh}</span></div>${k.kind === 'demo' ? '<span class="tag">Ejemplo</span>' : k.missing ? `<button class="tag miss" data-act="relink:${k.id}">Vincular</button>` : ''}</li>`).join('')}</ul>` : '<p class="empty">Aún no hay clips. Importa tus videos para empezar.</p>'}
+    ${S.clips.length ? `<ul class="clist">${S.clips.map(k => `<li data-act="selclip:${k.id}" class="${k.id === S.sel ? 'sel' : ''}" tabindex="0" role="button" aria-pressed="${k.id === S.sel}" aria-label="Clip ${esc(k.name)}, ${fmtS(k.out - k.in)}"><img src="${k.thumb}" alt=""><div><b>${esc(k.name)}</b><span>${fmtS(k.out - k.in)} · ${k.sw}×${k.sh}</span></div>${k.kind === 'demo' ? '<span class="tag">Ejemplo</span>' : k.missing ? `<button class="tag miss" data-act="relink:${k.id}">Vincular</button>` : ''}</li>`).join('')}</ul>` : '<p class="empty">Aún no hay clips. Importa tus videos para empezar.</p>'}
     ${S.clips.some(k => k.missing) ? '<p class="stat warn">Algunos videos no están guardados en este navegador. Toca <b>Vincular</b> y elige el mismo archivo para recuperarlos.</p>' : ''}
     ${S.clips.some(k => k.kind === 'demo') ? '<button data-act="clearDemo">Quitar clips de ejemplo</button>' : ''}
     ${musicPanel()}`;
@@ -79,8 +102,8 @@ export function renderPanel() {
       const i = S.clips.indexOf(c);
       h = `<h2>Editar clip</h2><p class="sub">${esc(c.name)} · ${fmtS(c.out - c.in)}</p>
     <div class="lbl">Recorte</div>
-    <div class="field"><span>Inicio</span><input type="range" id="k-in" data-k="in" min="0" max="${c.dur.toFixed(2)}" step="0.05" value="${c.in}"><output id="o-in">${fmtS(c.in)}</output></div>
-    <div class="field"><span>Final</span><input type="range" id="k-out" data-k="out" min="0" max="${c.dur.toFixed(2)}" step="0.05" value="${c.out}"><output id="o-out">${fmtS(c.out)}</output></div>
+    <div class="field"><span>Inicio</span><input type="range" id="k-in" data-k="in" aria-label="Inicio del clip" min="0" max="${c.dur.toFixed(2)}" step="0.05" value="${c.in}"><output id="o-in">${fmtS(c.in)}</output></div>
+    <div class="field"><span>Final</span><input type="range" id="k-out" data-k="out" aria-label="Final del clip" min="0" max="${c.dur.toFixed(2)}" step="0.05" value="${c.out}"><output id="o-out">${fmtS(c.out)}</output></div>
     ${
       c.kind === 'video'
         ? `<div class="lbl">Audio del clip</div>
@@ -94,7 +117,8 @@ export function renderPanel() {
     <div class="lbl">Acciones</div>
     <div class="grid2"><button data-act="split">Dividir en el cursor</button><button data-act="dup">Duplicar</button>
     <button data-act="left" ${i === 0 ? 'disabled' : ''}>Mover a la izquierda</button><button data-act="right" ${i === S.clips.length - 1 ? 'disabled' : ''}>Mover a la derecha</button>
-    ${c.kind === 'video' ? `<button data-act="mute">${c.mute ? 'Activar audio' : 'Silenciar audio'}</button>` : ''}<button class="danger" data-act="del">Eliminar clip</button></div>`;
+    ${c.kind === 'video' ? `<button data-act="mute">${c.mute ? 'Activar audio' : 'Silenciar audio'}</button>` : ''}<button class="danger" data-act="del">Eliminar clip</button></div>
+    <p class="note kbd-note">Atajos: <kbd>Espacio</kbd> reproducir · <kbd>←</kbd> <kbd>→</kbd> un cuadro (con <kbd>Shift</kbd>, 1 s) · <kbd>S</kbd> dividir · <kbd>Supr</kbd> eliminar clip · <kbd>Ctrl</kbd>+<kbd>Z</kbd> deshacer</p>`;
     }
   } else if (S.tab === 'trans') {
     const i = c ? S.clips.indexOf(c) : -1;
@@ -207,7 +231,7 @@ export function renderPanel() {
           : ''
       }
       ${o.kind !== 'sticker' ? `<div class="lbl">Color</div><div class="swatches">${COLORS.map(col => `<button class="sw" style="background:${col}" data-act="color:${col}" aria-pressed="${o.color === col}" aria-label="Color ${col}"></button>`).join('')}</div>` : ''}
-      <div class="field"><span>Tamaño</span><input type="range" id="k-ovsize" data-k="ovsize" min="0.025" max="0.3" step="0.005" value="${o.size}"><output id="o-ovsize">${Math.round(o.size * 100)}</output></div>
+      <div class="field"><span>Tamaño</span><input type="range" id="k-ovsize" data-k="ovsize" aria-label="Tamaño del elemento" min="0.025" max="0.3" step="0.005" value="${o.size}"><output id="o-ovsize">${Math.round(o.size * 100)}</output></div>
       <label class="chk"><input type="checkbox" id="k-follow" data-k="follow" ${o.follow ? 'checked' : ''} ${has ? '' : 'disabled'}> Seguir el objeto rastreado${has ? '' : ' (primero rastrea este clip)'}</label>
       ${
         o.follow && has && c.track.seed2
@@ -263,7 +287,7 @@ export function renderPanel() {
         : ''
     }`;
   }
-  panel.innerHTML = h;
+  panel.innerHTML = welcomeCard() + h;
   $('#pickHint').hidden = !S.pick;
 }
 
@@ -326,7 +350,7 @@ export function projectsPanel() {
     .map(p => {
       const isCur = cur && p.id === cur.id,
         conf = P.confirmDel === p.id;
-      return `<li class="${isCur ? 'sel' : ''}"${isCur ? '' : ` data-act="openProj:${p.id}"`}>
+      return `<li class="${isCur ? 'sel' : ''}"${isCur ? ' aria-current="true"' : ` data-act="openProj:${p.id}" tabindex="0" role="button" aria-label="Abrir ${esc(p.name)}"`}>
       ${p.thumb ? `<img src="${p.thumb}" alt="">` : '<span class="nothumb" aria-hidden="true"></span>'}
       <div><b>${esc(p.name)}</b><span>${isCur ? 'Abierto · ' : ''}${ago(p.updatedAt)} · ${p.clipsN} ${p.clipsN === 1 ? 'clip' : 'clips'} · ${fmtT(p.dur || 0)}</span></div>
       <button class="mini${conf ? ' danger' : ''}" data-act="delProj:${p.id}" aria-label="Eliminar ${esc(p.name)}">${conf ? '¿Eliminar?' : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>'}</button></li>`;

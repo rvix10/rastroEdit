@@ -6,7 +6,7 @@ import { ovPos, ovSetAbs } from './render.js';
 import { play, pause, seek } from './playback.js';
 import { runTrack } from './tracker.js';
 import { startExport, cancelExport, saveResult, setExportOpt } from './export.js';
-import { renderTabs, setTab, renderPanel } from './panel.js';
+import { renderTabs, setTab, renderPanel, markWelcome } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
 import { zoomAt } from './timeline-touch.js';
 import { importMusic, attachMusic, MUSIC_ACCEPT } from './music.js';
@@ -28,6 +28,7 @@ import {
 } from './project.js';
 
 /* ---------- acciones ---------- */
+const UNDO = { label: 'Deshacer', act: 'undo' };
 export function selClip(id) {
   S.sel = id;
   S.selOv = null;
@@ -217,7 +218,7 @@ export function act(a, el) {
       S.selOv = null;
       renderTimeline();
       renderPanel();
-      toast('Clip eliminado');
+      toast('Clip eliminado', UNDO);
       break;
     }
     case 'trans':
@@ -331,6 +332,7 @@ export function act(a, el) {
       S.selOv = null;
       renderTimeline();
       renderPanel();
+      toast('Elemento eliminado', UNDO);
       break;
     case 'export':
       startExport();
@@ -375,6 +377,14 @@ export function act(a, el) {
         }, 4000);
       }
       break;
+    case 'welcomeOk':
+      markWelcome();
+      renderPanel();
+      break;
+    case 'welcomeStart':
+      markWelcome();
+      newProject().then(() => toast('Proyecto nuevo: importa tus videos para empezar'));
+      break;
     case 'expRes':
       setExportOpt({ res: +arg });
       renderPanel();
@@ -388,7 +398,7 @@ export function act(a, el) {
       attachMusic(P.media);
       renderTimeline();
       renderPanel();
-      toast('Música quitada');
+      toast('Música quitada', UNDO);
       break;
     case 'music':
       setTab('media');
@@ -573,10 +583,61 @@ document.addEventListener('keydown', e => {
     }
   }
 });
+/* teclado: Enter/Espacio sobre clips, barras y listas; atajos de edición */
 document.addEventListener('keydown', e => {
-  if (e.code !== 'Space' || /INPUT|TEXTAREA|BUTTON/.test(document.activeElement.tagName)) return;
-  e.preventDefault();
-  if (!S.exporting) S.playing ? pause() : play();
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const a = document.activeElement || document.body;
+  if (/INPUT|TEXTAREA|SELECT/.test(a.tagName) || a.isContentEditable) return;
+  // Elementos con data-act que no son botones (clips, barras de la línea de tiempo, listas)
+  if ((e.key === 'Enter' || e.key === ' ') && a !== document.body && a.matches('[data-act]:not(button)')) {
+    e.preventDefault();
+    const key = a.dataset.act;
+    act(key, a);
+    // Tras redibujar, el foco vuelve al mismo elemento
+    requestAnimationFrame(() => {
+      const again = document.querySelector(`[data-act="${CSS.escape(key)}"]`);
+      if (again) again.focus();
+    });
+    return;
+  }
+  if (a.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return; // lo resuelve el botón
+  if (S.exporting) return;
+  switch (e.key) {
+    case ' ':
+      e.preventDefault();
+      S.playing ? pause() : play();
+      break;
+    case 'ArrowLeft':
+    case 'ArrowRight':
+      // Un cuadro (o 1 s con Shift)
+      e.preventDefault();
+      pause();
+      seek(S.T + (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 1 : 1 / 30));
+      break;
+    case 'Home':
+      e.preventDefault();
+      pause();
+      seek(0);
+      break;
+    case 'End':
+      e.preventDefault();
+      pause();
+      seek(S.total);
+      break;
+    case 's':
+    case 'S':
+      e.preventDefault();
+      doSplit();
+      commit();
+      break;
+    case 'Delete':
+    case 'Backspace':
+      if (getSel()) {
+        e.preventDefault();
+        act('del');
+      }
+      break;
+  }
 });
 
 /* gestos de la línea de tiempo: timeline-touch.js */

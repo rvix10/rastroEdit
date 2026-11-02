@@ -247,6 +247,17 @@ export function renderFrame(T) {
   if (!act.length) {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, S.W, S.H);
+    if (!S.clips.length && !S.exporting) {
+      // Proyecto vacío: qué hacer, en vez de una pantalla negra
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#e9ebf1';
+      ctx.font = `800 ${Math.round(S.H * 0.05)}px Manrope, system-ui, sans-serif`;
+      ctx.fillText('Importa tus videos para empezar', S.W / 2, S.H / 2 - S.H * 0.03);
+      ctx.fillStyle = '#8c93a3';
+      ctx.font = `600 ${Math.round(S.H * 0.032)}px Manrope, system-ui, sans-serif`;
+      ctx.fillText('Medios → Importar videos', S.W / 2, S.H / 2 + S.H * 0.045);
+    }
     return;
   }
   if (act.length === 1) {

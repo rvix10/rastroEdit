@@ -21,7 +21,7 @@ export function renderTimeline() {
   let cl = S.clips
     .map(
       c =>
-        `<div class="clip${c.id === S.sel ? ' sel' : ''}" data-id="${c.id}" data-act="selclip:${c.id}" style="left:${c._start * pps}px;width:${c._len * pps}px;background-image:url('${c.thumb}')">${c._d ? `<i class="tz" style="width:${c._d * pps}px"></i>` : ''}${c.id === S.sel ? '<i class="th l" data-trim="l" aria-hidden="true"></i><i class="th r" data-trim="r" aria-hidden="true"></i>' : ''}<b>${esc(c.name)}${c.track && c.track.pts.length > 1 ? '<em class="tb">RASTREO</em>' : ''}${c.missing ? '<em class="tb miss">FALTA</em>' : ''}</b><span class="dur">${fmtS(c._len)}</span></div>`
+        `<div class="clip${c.id === S.sel ? ' sel' : ''}" data-id="${c.id}" data-act="selclip:${c.id}" tabindex="0" role="button" aria-pressed="${c.id === S.sel}" aria-label="Clip ${esc(c.name)}, ${fmtS(c._len)}" style="left:${c._start * pps}px;width:${c._len * pps}px;background-image:url('${c.thumb}')">${c._d ? `<i class="tz" style="width:${c._d * pps}px"></i>` : ''}${c.id === S.sel ? '<i class="th l" data-trim="l" aria-hidden="true"></i><i class="th r" data-trim="r" aria-hidden="true"></i>' : ''}<b>${esc(c.name)}${c.track && c.track.pts.length > 1 ? '<em class="tb">RASTREO</em>' : ''}${c.missing ? '<em class="tb miss">FALTA</em>' : ''}</b><span class="dur">${fmtS(c._len)}</span></div>`
     )
     .join('');
   S.clips.forEach((c, i) => {
@@ -40,7 +40,7 @@ export function renderTimeline() {
     let loops = '';
     if (m.loop && m.dur > 0)
       for (let t = m.dur - m.in; t < S.total; t += m.dur) loops += `<i style="left:${t * pps}px"></i>`;
-    rm.innerHTML = `<div class="mbar${m.missing ? ' miss' : ''}" data-act="music" style="width:${Math.max(24, len * pps)}px" title="Música de fondo">${loops}<b>♪ ${esc(m.name)}</b><span>${m.missing ? 'FALTA' : Math.round(m.vol * 100) + ' %'}</span></div>`;
+    rm.innerHTML = `<div class="mbar${m.missing ? ' miss' : ''}" data-act="music" tabindex="0" role="button" aria-label="Música de fondo: ${esc(m.name)}" style="width:${Math.max(24, len * pps)}px" title="Música de fondo">${loops}<b>♪ ${esc(m.name)}</b><span>${m.missing ? 'FALTA' : Math.round(m.vol * 100) + ' %'}</span></div>`;
     rm.hidden = false;
   } else {
     rm.innerHTML = '';
@@ -61,7 +61,7 @@ export function renderTimeline() {
     }
     lanes[ln] = b + 0.05;
     const nm = o.kind === 'ring' ? 'Aro' : o.kind === 'sticker' ? o.text : o.text.split('\n')[0] || 'Texto';
-    oh += `<div class="ovb${o.follow ? ' f' : ''}${o.id === S.selOv ? ' sel' : ''}" data-act="selov:${o.id}" style="left:${a * pps}px;width:${Math.max(18, (b - a) * pps)}px;top:${ln * 24}px">${esc(nm)}</div>`;
+    oh += `<div class="ovb${o.follow ? ' f' : ''}${o.id === S.selOv ? ' sel' : ''}" data-act="selov:${o.id}" tabindex="0" role="button" aria-label="Elemento ${esc(nm)}" style="left:${a * pps}px;width:${Math.max(18, (b - a) * pps)}px;top:${ln * 24}px">${esc(nm)}</div>`;
   }
   const ro = $('#rowOvs');
   ro.innerHTML = oh;

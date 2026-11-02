@@ -1,4 +1,5 @@
 import { S, nid } from './state.js';
+import { toast } from './util.js';
 import { ballPos } from './demo.js';
 import { demoClip } from './clips.js';
 import { updPlayBtn, makeMini, loop } from './playback.js';
@@ -7,7 +8,6 @@ import { renderTabs, renderPanel } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
 import { bootProjects, adoptCurrent, updHistUI } from './project.js';
 import './store.js';
-import './util.js';
 import './timeline.js';
 import './transitions.js';
 import './render.js';
@@ -126,4 +126,16 @@ export async function init() {
   }
 }
 window.addEventListener('resize', () => renderTimeline());
+
+// Si algo falla de forma inesperada, un aviso claro en vez de silencio (como mucho uno cada 8 s)
+let lastOops = 0;
+const oops = () => {
+  if (Date.now() - lastOops < 8000) return;
+  lastOops = Date.now();
+  toast('Algo falló. Tu proyecto está guardado; si se repite, recarga la página.');
+};
+window.addEventListener('error', e => {
+  if (!e.filename || e.filename.startsWith(location.origin)) oops();
+});
+window.addEventListener('unhandledrejection', () => oops());
 init();

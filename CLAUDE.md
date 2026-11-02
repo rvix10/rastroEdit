@@ -13,9 +13,9 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Verificar sintaxis: `for f in js/*.js; do node --check --input-type=module < $f; done`
 - Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
 - Prueba de humo: `node tests/smoke.cjs` (o solo algunas secciones: `node tests/smoke.cjs tactil 2puntos`;
-  secciones: basico, tablet, tactil, audio, export, rastreo, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
+  secciones: basico, tablet, tactil, audio, export, rastreo, acceso, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
   del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
-  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo rápido (tiempo, sin trabas, mismo resultado sin Worker), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
+  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo rápido (tiempo, sin trabas, mismo resultado sin Worker), accesibilidad y primer uso (contraste, nombres, teclado, avisos, bienvenida), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
@@ -102,6 +102,14 @@ python3 -m http.server 8080   # abrir http://localhost:8080
   autoguardar, al terminar un rastreo…) y el archivo elegido se perdería si el diálogo estaba abierto.
 - Rastreo: solo uno a la vez (`S.tracking`). El automático del ejemplo es silencioso (`S.trackSilent`) y cede el paso si
   la persona pide otro; quitar el clip que se rastrea pone `S.trackCancel`. El resultado debe ser idéntico con o sin Worker.
+- Accesibilidad: todo lo tocable que no sea `<button>`/`<input>` (clips, barras, listas) lleva `tabindex="0"`,
+  `role="button"` y `aria-label`; Enter/Espacio lo activa (actions.js) y el foco vuelve al mismo elemento tras redibujar.
+  Los deslizadores llevan `aria-label`. Los avisos se anuncian por `#srLive` (role="status"); el panel no es `aria-live`.
+  La sección `acceso` de la prueba revisa contraste AA, nombres y teclado en las 7 pestañas.
+- Avisos: `toast(texto, { label: 'Deshacer', act: 'undo' })` agrega un botón; úsalo al eliminar algo.
+- Atajos: Espacio, ←/→ (un cuadro; Shift: 1 s), Inicio/Fin, S dividir, Supr eliminar clip, Ctrl+Z/Y, Ctrl+S.
+- Primer uso: la bienvenida (`welcomeCard` en panel.js) se ve mientras el proyecto tiene clips de ejemplo, hasta que se
+  cierra (`localStorage` `rastro.welcome`). Un proyecto sin clips muestra en la vista previa qué hacer.
 - UI con `data-act="accion:arg"`, `data-tab`, `data-k` (inputs). No usar `alert/confirm/prompt`: confirmaciones dentro de la página.
 - Textos de la interfaz en español, directos, desde el lado del usuario. Toast tras acciones ("Clip dividido", "Proyecto eliminado").
 - Colores siempre desde los tokens de `:root` en `css/styles.css`. Debe funcionar a 390 px de ancho sin scroll horizontal.

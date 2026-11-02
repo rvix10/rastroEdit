@@ -1,6 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
 //   node tests/smoke.cjs                 todo
-//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, 2puntos, rotacion, demux)
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, acceso, 2puntos, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -1183,6 +1183,182 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       !w.errs.length && !nw.errs.length,
       'sin errores' + (w.errs.length || nw.errs.length ? ': ' + [...w.errs, ...nw.errs].join(' | ') : '')
     );
+  }
+
+  // Accesibilidad y primer uso: contraste, nombres, teclado, avisos para lectores de pantalla, bienvenida
+  if (run('acceso')) {
+    console.log('\nAccesibilidad y primer uso');
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    const errs = [];
+    page.on('pageerror', e => errs.push(e.message));
+    page.on('console', m => m.type() === 'error' && errs.push(m.text()));
+    await page.goto(url);
+    await until(page, async () => {
+      const { S } = await import('/js/state.js');
+      return S.clips.length === 3 && !S.tracking;
+    });
+    check(
+      await page.evaluate(() => !!document.querySelector('.welcome')),
+      'la primera vez se ve la bienvenida del proyecto de ejemplo'
+    );
+    const found = { contrast: new Set(), noname: new Set(), nokbd: new Set() };
+    for (const tab of ['media', 'edit', 'trans', 'track', 'text', 'export', 'projects']) {
+      await page.evaluate(async t => {
+        const { S } = await import('/js/state.js');
+        if (t === 'text') S.selOv = S.ovs[0].id;
+        (await import('/js/panel.js')).setTab(t);
+      }, tab);
+      await page.waitForTimeout(200);
+      const r = await page.evaluate(() => {
+        const rgb = s => (s.match(/[\d.]+/g) || [0, 0, 0]).map(Number);
+        const lum = ([r, g, b]) => {
+          const f = v => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+          return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+        };
+        // Fondo efectivo: se componen los fondos semitransparentes hasta uno opaco
+        const bgOf = e => {
+          const layers = [];
+          for (let n = e; n; n = n.parentElement) {
+            const cs = getComputedStyle(n);
+            if (cs.backgroundImage !== 'none' && !/gradient/.test(cs.backgroundImage)) return null;
+            const c = rgb(cs.backgroundColor),
+              a = c[3] === undefined ? 1 : c[3];
+            if (a > 0) layers.push([c[0], c[1], c[2], a]);
+            if (a >= 0.99) break;
+          }
+          let out =
+            layers.length && layers[layers.length - 1][3] >= 0.99
+              ? layers.pop().slice(0, 3)
+              : rgb(getComputedStyle(document.body).backgroundColor).slice(0, 3);
+          for (let i = layers.length - 1; i >= 0; i--) {
+            const [r, g, b, a] = layers[i];
+            out = [r * a + out[0] * (1 - a), g * a + out[1] * (1 - a), b * a + out[2] * (1 - a)];
+          }
+          return out;
+        };
+        const out = { contrast: [], noname: [], nokbd: [] };
+        for (const e of document.querySelectorAll('body *')) {
+          const bx = e.getBoundingClientRect();
+          if (!bx.width || !bx.height || e.closest('#vids,#pickers,.clip,canvas,.sr-only')) continue;
+          if (
+            [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim()) &&
+            !e.closest(':disabled,[disabled]')
+          ) {
+            const cs = getComputedStyle(e),
+              bg = bgOf(e);
+            if (bg) {
+              const L1 = lum(rgb(cs.color)),
+                L2 = lum(bg),
+                ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+              const size = parseFloat(cs.fontSize),
+                large = size >= 24 || (+cs.fontWeight >= 700 && size >= 18.66);
+              if (ratio < (large ? 3 : 4.5))
+                out.contrast.push(`${e.textContent.trim().slice(0, 20)} ${ratio.toFixed(2)}:1`);
+            }
+          }
+          if (e.matches('button,input,select,textarea,[data-act],[data-tab]') && e.type !== 'file') {
+            const name =
+              (e.getAttribute('aria-label') || e.textContent || '').trim() ||
+              (e.labels && [...e.labels].map(l => l.textContent.trim()).join('')) ||
+              e.title;
+            if (!name) out.noname.push(`${e.tagName.toLowerCase()} ${e.id || e.dataset.act || e.dataset.k || ''}`);
+            if (!(e.matches('button,input,select,textarea,[tabindex]') && e.tabIndex >= 0))
+              out.nokbd.push(`${e.tagName.toLowerCase()} ${e.dataset.act || ''}`);
+          }
+        }
+        return out;
+      });
+      for (const k of Object.keys(found)) r[k].forEach(x => found[k].add(x + ` [${tab}]`));
+    }
+    check(
+      !found.contrast.size,
+      'contraste de texto WCAG AA en las 7 pestañas' +
+        (found.contrast.size ? ': ' + [...found.contrast].slice(0, 5).join(' · ') : '')
+    );
+    check(
+      !found.noname.size,
+      'todos los controles tienen nombre para lectores de pantalla' +
+        (found.noname.size ? ': ' + [...found.noname].join(' · ') : '')
+    );
+    check(
+      !found.nokbd.size,
+      'todo lo que se toca también se alcanza con el teclado' +
+        (found.nokbd.size ? ': ' + [...found.nokbd].join(' · ') : '')
+    );
+    // Teclado: Tab hasta un clip de la línea de tiempo y Enter lo selecciona
+    await page.evaluate(async () => (await import('/js/panel.js')).setTab('edit'));
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+    let steps = 0;
+    for (let i = 0; i < 120 && !steps; i++) {
+      await page.keyboard.press('Tab');
+      if (
+        await page.evaluate(
+          () =>
+            /^Clip Lago/.test(document.activeElement.getAttribute('aria-label') || '') &&
+            !!document.activeElement.closest('#rowClips')
+        )
+      )
+        steps = i + 1;
+    }
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    const sel = await page.evaluate(async () => {
+      const { S } = await import('/js/state.js');
+      return { sel: S.clips.find(c => c.id === S.sel).name, focus: document.activeElement.getAttribute('aria-label') };
+    });
+    check(
+      steps && sel.sel === 'Lago' && /^Clip Lago/.test(sel.focus),
+      `Tab llega a un clip de la línea de tiempo (${steps} pasos) y Enter lo selecciona sin perder el foco`
+    );
+    // Atajos: → avanza un cuadro, Shift+→ un segundo; S divide; Supr elimina con «Deshacer» en el aviso
+    await page.evaluate(async () => {
+      const { S } = await import('/js/state.js');
+      S.T = 0;
+      document.activeElement.blur();
+    });
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Shift+ArrowRight');
+    const T = await page.evaluate(async () => (await import('/js/state.js')).S.T);
+    check(Math.abs(T - (1 + 1 / 30)) < 1e-6, `→ avanza un cuadro y Shift+→ un segundo (${T.toFixed(3)} s)`);
+    await page.evaluate(async () => {
+      const { S } = await import('/js/state.js');
+      S.sel = S.clips[0].id;
+      S.T = 2;
+    });
+    await page.keyboard.press('s');
+    const nSplit = await page.evaluate(async () => (await import('/js/state.js')).S.clips.length);
+    await page.keyboard.press('Delete');
+    await page.waitForTimeout(80);
+    const del = await page.evaluate(async () => ({
+      n: (await import('/js/state.js')).S.clips.length,
+      toast: document.querySelector('#toast').textContent,
+      live: document.querySelector('#srLive').textContent,
+    }));
+    await page.click('#toast button');
+    const back = await page.evaluate(async () => (await import('/js/state.js')).S.clips.length);
+    check(
+      nSplit === 4 && del.n === 3 && back === 4 && /Deshacer/.test(del.toast),
+      'S divide, Supr elimina y «Deshacer» del aviso lo recupera'
+    );
+    check(
+      del.live === 'Clip eliminado' &&
+        (await page.evaluate(() => document.querySelector('#srLive').getAttribute('role'))) === 'status',
+      'los avisos se anuncian a lectores de pantalla'
+    );
+    // Bienvenida: «Entendido» la cierra para siempre en este navegador
+    await page.evaluate(async () => (await import('/js/panel.js')).setTab('media'));
+    await page.click('[data-act="welcomeOk"]');
+    await page.reload();
+    await until(page, async () => {
+      const { S } = await import('/js/state.js');
+      return S.clips.length > 0;
+    });
+    check(
+      !(await page.evaluate(() => !!document.querySelector('.welcome'))),
+      'después de «Entendido», la bienvenida no vuelve a aparecer'
+    );
+    check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
+    await page.close();
   }
 
   const extra = ensureExtra();
