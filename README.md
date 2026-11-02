@@ -16,7 +16,7 @@ Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 | **Proyectos** | Autoguardado en el navegador (IndexedDB), con los videos incluidos. Lista de proyectos, nuevo, duplicar, renombrar y eliminar. Si falta un video, se marca y se puede volver a vincular. |
 | **Pasar a otro equipo** | *Guardar .rastro* crea un archivo con el proyecto y sus videos; *Abrir .rastro* lo agrega como proyecto nuevo en otro navegador o dispositivo. |
 | **Deshacer / rehacer** | Hasta 60 pasos. Botones en la barra superior, o `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`). `Ctrl+S` fuerza el guardado. |
-| **Exportar** | Graba el lienzo con `MediaRecorder` a MP4 (si el navegador lo soporta) o WebM, con audio. Si cambias de pestaña, la grabación se pausa y sigue al volver. |
+| **Exportar** | MP4 armado cuadro por cuadro con WebCodecs (H.264 o VP9, audio AAC u Opus): no depende de reproducir en tiempo real y cada cuadro es exacto. En navegadores sin WebCodecs, graba el lienzo con `MediaRecorder` en tiempo real. Si cambias de pestaña, se pausa y sigue al volver. |
 
 ## Cómo correrlo
 
@@ -51,7 +51,11 @@ js/
   render.js       composición de cada cuadro, overlays y guías
   playback.js     reproducción, sincronía de video/audio, bucle principal
   tracker.js      rastreo de movimiento
-  export.js       exportación con MediaRecorder
+  export.js       exportación: elige la rápida o MediaRecorder
+  fastexport.js   exportación con WebCodecs (cuadro por cuadro + audio fuera de línea)
+  frames.js       cuadros exactos de un video con VideoDecoder
+  demux.js        índice de MP4/MOV y WebM/MKV
+  mp4.js          escritura del .mp4
   panel.js        panel de herramientas (pestañas)
   timeline-ui.js  dibujo de la línea de tiempo
   actions.js      acciones de UI y eventos de puntero/teclado
@@ -94,6 +98,6 @@ Precisión medida en pruebas: error promedio de ~2 px en el clip de ejemplo y de
 - [ ] Tracking planar de 4 esquinas (homografía) para reemplazar pantallas y letreros
 - [x] Guardar y abrir proyectos (IndexedDB)
 - [ ] Pista de música y control de volumen por clip
-- [ ] Exportación más rápida que tiempo real con WebCodecs
+- [x] Exportación más rápida que tiempo real con WebCodecs
 - [x] Deshacer / rehacer
 - [x] Exportar / importar proyecto como archivo (.rastro) para pasarlo a otro equipo

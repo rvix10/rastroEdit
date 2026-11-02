@@ -136,14 +136,17 @@ export function loop(now) {
     }
   }
   S.last = now;
-  syncMedia(S.T);
-  renderFrame(S.T);
+  // En la exportación rápida, fastexport.js mueve los videos y dibuja cada cuadro
+  if (!S.expFast) {
+    syncMedia(S.T);
+    renderFrame(S.T);
+  }
   const x = S.T * S.pps + 12;
   $('#ph').style.left = x + 'px';
   $('#tcNow').textContent = fmtT(S.T);
   if (S.playing && (x > tlScroll.scrollLeft + tlScroll.clientWidth - 40 || x < tlScroll.scrollLeft))
     tlScroll.scrollLeft = x - 60;
-  if (S.exporting) {
+  if (S.exporting && !S.expFast) {
     const b = $('#expBar');
     if (b) b.style.width = (S.T / S.total) * 100 + '%';
   }

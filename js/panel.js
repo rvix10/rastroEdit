@@ -1,7 +1,7 @@
 import { $, panel, S } from './state.js';
 import { esc, fmtS, fmtT, getSel, getOv } from './util.js';
 import { TR, FILTERS } from './transitions.js';
-import { pickMime, cancelExport } from './export.js';
+import { exportInfo, cancelExport } from './export.js';
 import { act } from './actions.js';
 import { P, refreshList } from './project.js';
 
@@ -189,15 +189,18 @@ export function renderPanel() {
     }`;
     }
   } else if (S.tab === 'export') {
-    const mime = pickMime(),
-      fmt = mime === null ? 'No disponible' : /mp4/.test(mime) ? 'MP4' : 'WebM';
+    const info = exportInfo();
     h = `<h2>Exportar</h2>
-    <dl class="specs"><dt>Resolución</dt><dd>${S.W} × ${S.H}</dd><dt>Duración</dt><dd>${fmtT(S.total)}</dd><dt>Cuadros</dt><dd>30 fps</dd><dt>Formato</dt><dd>${fmt}</dd></dl>
-    <p class="note">La exportación reproduce el proyecto en tiempo real: tarda lo mismo que dura el video. Si cambias de pestaña, se pausa y sigue cuando vuelvas.</p>
-    ${S.exporting ? `<div class="prog"><i id="expBar" style="transition:none"></i></div><button data-act="cancelExport">Detener exportación</button>` : `<button class="primary" data-act="export" ${S.clips.length && mime !== null ? '' : 'disabled'}>Exportar video</button>`}
+    <dl class="specs"><dt>Resolución</dt><dd>${S.W} × ${S.H}</dd><dt>Duración</dt><dd>${fmtT(S.total)}</dd><dt>Cuadros</dt><dd>30 fps</dd><dt>Formato</dt><dd>${info.fmt}</dd></dl>
+    <p class="note">${
+      info.fast
+        ? 'Se arma cuadro por cuadro, más rápido que tiempo real. Si cambias de pestaña, se pausa y sigue cuando vuelvas.'
+        : 'La exportación reproduce el proyecto en tiempo real: tarda lo mismo que dura el video. Si cambias de pestaña, se pausa y sigue cuando vuelvas.'
+    }</p>
+    ${S.exporting ? `<div class="prog"><i id="expBar" style="transition:none"></i></div><button data-act="cancelExport">Detener exportación</button>` : `<button class="primary" data-act="export" ${S.clips.length && info.ok ? '' : 'disabled'}>Exportar video</button>`}
     ${
       S.result && !S.exporting
-        ? `<div class="lbl">Resultado · ${(S.result.size / 1048576).toFixed(1).replace('.', ',')} MB</div><video class="result" src="${S.result.url}" controls playsinline></video>
+        ? `<div class="lbl">Resultado · ${(S.result.size / 1048576).toFixed(1).replace('.', ',')} MB${S.result.took ? ' · listo en ' + fmtS(S.result.took) : ''}</div><video class="result" src="${S.result.url}" controls playsinline></video>
       <button class="primary" data-act="save">Guardar archivo .${S.result.ext}</button><p class="note" id="saveMsg"></p>`
         : ''
     }`;

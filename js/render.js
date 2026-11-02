@@ -4,6 +4,7 @@ import { coverOf, mapSrc } from './clips.js';
 import { activeAt, localOf } from './timeline.js';
 import { TR, applyFilter } from './transitions.js';
 import { act } from './actions.js';
+import { drawRotated } from './frames.js';
 
 /* ---------- render ---------- */
 export function sourceOf(c, local) {
@@ -22,10 +23,13 @@ export function drawClipLayer(c, local, L) {
   g.globalCompositeOperation = 'source-over';
   g.fillStyle = '#000';
   g.fillRect(0, 0, S.W, S.H);
-  const src = sourceOf(c, local);
+  // Exportación rápida: cuadro decodificado por frames.js (con la rotación del archivo)
+  const xf = S.expFrames && S.expFrames.get(c.id);
+  const src = xf ? xf.frame : sourceOf(c, local);
   if (src) {
     const m = coverOf(c);
-    g.drawImage(src, m.dx, m.dy, m.dw, m.dh);
+    if (xf) drawRotated(g, src, xf.rotation, m.dx, m.dy, m.dw, m.dh);
+    else g.drawImage(src, m.dx, m.dy, m.dw, m.dh);
   } else if (c.missing) {
     drawMissing(g, c);
     return;

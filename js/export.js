@@ -3,6 +3,7 @@ import { toast, saveBlob } from './util.js';
 import { ensureAudio } from './clips.js';
 import { play, pause } from './playback.js';
 import { renderPanel } from './panel.js';
+import { fastCodecs, exportFast, codecName } from './fastexport.js';
 
 /* ---------- exportación ---------- */
 export function pickMime() {
@@ -24,8 +25,73 @@ export function pickMime() {
     }) || ''
   );
 }
-export function startExport() {
-  if (!S.clips.length) return;
+/** Cómo se va a exportar con el tamaño actual (para el panel). */
+export function exportInfo() {
+  const key = S.W + 'x' + S.H;
+  if (!S.fastBroken && (!S.fastInfo || S.fastInfo.key !== key)) {
+    const info = (S.fastInfo = { key, codecs: undefined });
+    fastCodecs().then(c => {
+      info.codecs = c;
+      if (S.fastInfo === info && S.tab === 'export' && !S.exporting) renderPanel();
+    });
+  }
+  const c = !S.fastBroken && S.fastInfo && S.fastInfo.codecs;
+  if (c) return { fast: true, ok: true, fmt: 'MP4 · ' + codecName(c.video) + (c.audio ? '' : ' · sin audio') };
+  const mime = pickMime();
+  return { fast: false, ok: mime !== null, fmt: mime === null ? 'No disponible' : /mp4/.test(mime) ? 'MP4' : 'WebM' };
+}
+function setResult(blob, ext, took) {
+  if (S.result) URL.revokeObjectURL(S.result.url);
+  S.result = { blob, ext, url: URL.createObjectURL(blob), size: blob.size, took };
+}
+
+export async function startExport() {
+  if (!S.clips.length || S.exporting) return;
+  pause();
+  S.selOv = null;
+  const codecs = S.fastBroken ? null : await fastCodecs();
+  if (codecs) startFast();
+  else startRealtime();
+}
+
+async function startFast() {
+  S.exporting = true;
+  S.expFast = true;
+  S.expCancel = false;
+  S.expHidden = false;
+  renderPanel();
+  const t0 = performance.now();
+  let r = null,
+    err = null;
+  try {
+    r = await exportFast(p => {
+      const b = $('#expBar');
+      if (b) b.style.width = p * 100 + '%';
+    });
+  } catch (e) {
+    err = e;
+  }
+  const cancelled = S.expCancel;
+  S.exporting = false;
+  S.expFast = false;
+  S.expCancel = false;
+  S.expHidden = false;
+  if (err) {
+    console.warn('Exportación rápida', err);
+    S.fastBroken = true;
+    toast('La exportación rápida falló en este navegador; se usará la exportación en tiempo real');
+    startRealtime();
+    return;
+  }
+  if (r && !cancelled) {
+    const took = (performance.now() - t0) / 1000;
+    setResult(r.blob, r.ext, took);
+    toast('Video exportado');
+  }
+  renderPanel();
+}
+
+function startRealtime() {
   if (!window.MediaRecorder || !cv.captureStream) {
     toast('Este navegador no permite grabar video desde la página');
     return;
@@ -56,10 +122,8 @@ export function startExport() {
       return;
     }
     const type = rec.mimeType || mime || 'video/webm',
-      blob = new Blob(chunks, { type }),
-      ext = /mp4/.test(type) ? 'mp4' : 'webm';
-    if (S.result) URL.revokeObjectURL(S.result.url);
-    S.result = { blob, ext, url: URL.createObjectURL(blob), size: blob.size };
+      blob = new Blob(chunks, { type });
+    setResult(blob, /mp4/.test(type) ? 'mp4' : 'webm');
     renderPanel();
     toast('Video exportado');
   };
@@ -80,6 +144,7 @@ export function finishExport() {
 }
 export function cancelExport() {
   S.expCancel = true;
+  if (S.expFast) return; // el bucle de exportFast() lo ve y termina
   S.exporting = false;
   S.expHidden = false;
   pause();
@@ -90,7 +155,7 @@ export function cancelExport() {
 // En segundo plano el navegador deja de dibujar cuadros (requestAnimationFrame se detiene),
 // pero MediaRecorder seguiría grabando: el video saldría congelado. Se pausa todo y se retoma al volver.
 document.addEventListener('visibilitychange', () => {
-  if (!S.exporting || !S.rec) return;
+  if (!S.exporting || S.expFast || !S.rec) return; // la rápida maneja su propia pausa
   if (document.visibilityState === 'hidden') {
     if (S.expHidden) return;
     S.expHidden = true;

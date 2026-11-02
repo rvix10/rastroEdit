@@ -9,7 +9,13 @@ const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const FIX = path.join(__dirname, 'fixtures', 'test.webm');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webm': 'video/webm' };
+const TYPES = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
+};
 
 // Video de 4 s con un objeto cuyo centro es x = 110+240t, y = 330+120·sin 2t (en 1280×720)
 function ensureFixture() {
@@ -50,6 +56,46 @@ function ensureFixture() {
     { stdio: 'inherit' }
   );
 }
+// Más archivos para el demuxer y la rotación (se omiten si este ffmpeg no tiene el códec)
+const EXTRA = {
+  'h264-bframes.mp4': ['-i', FIX, '-c:v', 'libx264', '-bf', '2', '-g', '45', '-c:a', 'aac'],
+  'vp9.mp4': ['-i', FIX, '-t', '2', '-c:v', 'libvpx-vp9', '-b:v', '2M', '-an'],
+  'live.webm': ['-i', FIX, '-c', 'copy', '-live', '1', '-f', 'webm'],
+};
+function ensureExtra() {
+  const out = {};
+  const run = (name, args) => {
+    const f = path.join(__dirname, 'fixtures', name);
+    if (!fs.existsSync(f))
+      try {
+        execFileSync('ffmpeg', ['-loglevel', 'error', '-y', ...args, f]);
+      } catch (e) {
+        return;
+      }
+    out[name] = f;
+  };
+  for (const [name, args] of Object.entries(EXTRA)) run(name, args);
+  // Video de celular girado: solo se marca la rotación (sin recodificar)
+  if (out['vp9.mp4']) run('rot90.mp4', ['-display_rotation', '90', '-i', out['vp9.mp4'], '-c', 'copy']);
+  return out;
+}
+const ffprobePackets = f =>
+  execFileSync('ffprobe', [
+    '-v',
+    'error',
+    '-select_streams',
+    'v',
+    '-show_entries',
+    'packet=pts_time,pos,size,flags',
+    '-of',
+    'csv=p=0',
+    f,
+  ])
+    .toString()
+    .trim()
+    .split('\n')
+    .map(l => l.split(','));
+
 const truth = t => ({ x: 110 + 240 * t, y: 330 + 120 * Math.sin(2 * t) });
 
 function serve() {
@@ -148,27 +194,142 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     );
     check(drift < 0.05, `reloj sincronizado con el video (desfase ${(drift * 1000).toFixed(0)} ms tras tirones)`);
 
-    // Exportar, con la pestaña en segundo plano a mitad de camino
-    await page.click('[data-tab="export"]');
-    await page.evaluate(`(async () => { ${mods} ac.act('export'); })()`);
-    await page.waitForTimeout(1200);
+    // Exportación rápida (WebCodecs), con la pestaña en segundo plano a mitad de camino
     const setVis = v =>
       page.evaluate(v => {
         Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => v });
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => v === 'hidden' });
         document.dispatchEvent(new Event('visibilitychange'));
       }, v);
+    await page.click('[data-tab="export"]');
+    await until(page, () => /MP4 · /.test(document.querySelector('.specs')?.textContent || ''), null, 5000);
+    const fmt = await page.$eval('.specs', e => e.textContent);
+    check(
+      /MP4 · (H\.264|VP9|AV1)/.test(fmt),
+      'ofrece la exportación rápida (' + (fmt.match(/MP4 · [^ ]+/) || [''])[0] + ')'
+    );
+    await page.click('[data-act="export"]');
+    await until(page, async () => (await import('/js/state.js')).S.T > 0.5, null, 15000);
+    await setVis('hidden');
+    await page.waitForTimeout(300);
+    const h1 = await page.evaluate(`(async () => { ${mods} return [st.S.expHidden, st.S.T] })()`);
+    await page.waitForTimeout(800);
+    const h2 = await page.evaluate(`(async () => { ${mods} return st.S.T })()`);
+    check(h1[0] && h2 === h1[1], 'en segundo plano la exportación se pausa');
+    await setVis('visible');
+    check(
+      await until(
+        page,
+        async () => {
+          const { S } = await import('/js/state.js');
+          return !!S.result && !S.exporting;
+        },
+        null,
+        60000
+      ),
+      'la exportación se reanuda y termina'
+    );
+    const fx = await page.evaluate(
+      `(async () => { ${mods} const r = st.S.result, { demux } = await import('/js/demux.js'), { FrameSource } = await import('/js/frames.js');
+        const info = await demux(r.blob);
+        // Posición del objeto en cuadros del archivo exportado (es lo único saturado de la imagen)
+        const fs = await FrameSource.open(r.blob), cv = document.createElement('canvas'); cv.width = 320; cv.height = 180;
+        const g = cv.getContext('2d', { willReadFrequently: true }), errs = [];
+        for (let i = 3; i < 118; i += 8) {
+          const t = i / 30; g.drawImage(await fs.frameAt(t), 0, 0, 320, 180);
+          const d = g.getImageData(0, 0, 320, 180).data; let sx = 0, n = 0;
+          for (let p = 0; p < d.length; p += 4) { const mx = Math.max(d[p], d[p+1], d[p+2]), mn = Math.min(d[p], d[p+1], d[p+2]);
+            if (mx - mn > 120) { sx += (p / 4) % 320; n++ } }
+          errs.push(Math.abs((sx / n) * 4 - (110 + 240 * t)));
+        }
+        fs.close();
+        return { ext: r.ext, took: r.took, codec: info && info.codec, n: info && info.samples.length,
+          err: errs.reduce((a, b) => a + b, 0) / errs.length, maxErr: Math.max(...errs) } })()`
+    );
+    check(
+      fx.ext === 'mp4' && fx.n === 120,
+      `MP4 con 120 cuadros (${fx.codec}, listo en ${fx.took.toFixed(1)} s para 4 s de video)`
+    );
+    check(
+      fx.maxErr < 5,
+      `cuadros exactos: el objeto está donde debe (error medio ${fx.err.toFixed(1)} px; un cuadro = 8 px)`
+    );
+    const [dlv] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="save"]')]);
+    const outMp4 = path.join(__dirname, 'fixtures', 'export.mp4');
+    await dlv.saveAs(outMp4);
+    const probe = execFileSync('ffprobe', [
+      '-v',
+      'error',
+      '-show_entries',
+      'stream=codec_type,codec_name,nb_frames',
+      '-of',
+      'csv=p=0',
+      outMp4,
+    ])
+      .toString()
+      .trim()
+      .replace(/\n/g, ' · ');
+    check(/video/.test(probe) && /audio/.test(probe), `ffprobe lee el archivo guardado (${probe})`);
+
+    // Cancelar a mitad de camino
+    const prev = await page.evaluate(`(async () => { ${mods} return st.S.result.url })()`);
+    await page.click('[data-act="export"]');
+    await until(page, async () => (await import('/js/state.js')).S.T > 0.3, null, 15000);
+    await page.click('[data-act="cancelExport"]');
+    check(
+      await until(
+        page,
+        async u => {
+          const { S } = await import('/js/state.js');
+          return !S.exporting && S.result.url === u;
+        },
+        prev,
+        5000
+      ),
+      'se puede detener la exportación'
+    );
+
+    // Si WebCodecs falla, se usa la exportación en tiempo real (MediaRecorder)
+    const prevRt = await page.evaluate(`(async () => { ${mods} return st.S.result.url })()`);
+    await page.evaluate(() => {
+      window.VideoEncoder = class {
+        constructor() {
+          throw new Error('simulado');
+        }
+      };
+    });
+    await page.click('[data-act="export"]');
+    check(
+      await until(
+        page,
+        async () => {
+          const { S } = await import('/js/state.js');
+          return S.fastBroken && S.exporting && S.rec && S.rec.state === 'recording';
+        },
+        null,
+        5000
+      ),
+      'si la exportación rápida falla, sigue en tiempo real'
+    );
+    await page.waitForTimeout(800);
     await setVis('hidden');
     const p1 = await page.evaluate(`(async () => { ${mods} return [st.S.rec.state, st.S.playing, st.S.T] })()`);
     await page.waitForTimeout(800);
     const T2 = await page.evaluate(`(async () => { ${mods} return st.S.T })()`);
-    check(p1[0] === 'paused' && !p1[1] && T2 === p1[2], 'en segundo plano la exportación se pausa');
+    check(p1[0] === 'paused' && !p1[1] && T2 === p1[2], 'en tiempo real también se pausa en segundo plano');
     await setVis('visible');
     check(
-      await until(page, async () => !!(await import('/js/state.js')).S.result, null, 15000),
-      'la exportación se reanuda y termina'
+      await until(
+        page,
+        async u => {
+          const { S } = await import('/js/state.js');
+          return !S.exporting && S.result.url !== u;
+        },
+        prevRt,
+        15000
+      ),
+      'la exportación en tiempo real termina'
     );
-    const res = await page.evaluate(`(async () => { ${mods} return st.S.result.size })()`);
-    check(res > 10000, `archivo exportado (${(res / 1024).toFixed(0)} KB)`);
 
     // Archivo .rastro: guardar el proyecto con su video y volver a abrirlo como proyecto nuevo
     await page.click('[data-tab="projects"]');
@@ -254,6 +415,19 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       null,
       15000
     );
+    if (!ok)
+      console.log(
+        await page.evaluate(async () => {
+          const { S } = await import('/js/state.js');
+          const { P } = await import('/js/project.js');
+          return JSON.stringify({
+            clips: S.clips.map(c => [c.kind, c.missing, c.el && c.el.readyState]),
+            tracking: S.tracking,
+            file: P.file,
+            toast: document.querySelector('#toast').textContent,
+          });
+        })
+      );
     check(ok, 'abre el .rastro con su video');
     await page.reload();
     const kept = await until(
@@ -268,6 +442,96 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     check(kept, 'tras recargar, el proyecto y el video siguen guardados');
     check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
     await ctx.close();
+  }
+
+  // Rotación de videos de celular: lo que dibuja el decodificador = lo que muestra <video>
+  const extra = ensureExtra();
+  if (extra['rot90.mp4']) {
+    console.log('\nVideo girado (rotación en el archivo)');
+    const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+    await page.goto(url);
+    await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+    const rot = await page.evaluate(async () => {
+      const st = await import('/js/state.js'),
+        { renderFrame } = await import('/js/render.js'),
+        { FrameSource } = await import('/js/frames.js'),
+        cl = await import('/js/clips.js');
+      const S = st.S,
+        blob = await (await fetch('/tests/fixtures/rot90.mp4')).blob();
+      const el = cl.makeVid(URL.createObjectURL(blob));
+      el.muted = true;
+      await new Promise(r => (el.onloadeddata = r));
+      const c = {
+        id: 'rot',
+        kind: 'video',
+        el,
+        sw: el.videoWidth,
+        sh: el.videoHeight,
+        dur: el.duration,
+        in: 0,
+        out: el.duration,
+        trans: { type: 'none', d: 0.5 },
+        filter: 'none',
+        mute: true,
+        track: null,
+        _start: 0,
+        _len: el.duration,
+        _d: 0,
+      };
+      const saved = S.clips;
+      S.clips = [c];
+      S.expFast = true; // que el bucle no dibuje encima
+      await new Promise(r => {
+        el.onseeked = r;
+        el.currentTime = 1.001;
+      });
+      await new Promise(r => setTimeout(r, 100));
+      renderFrame(1);
+      const A = st.ctx.getImageData(0, 0, S.W, S.H).data.slice();
+      const fs = await FrameSource.open(blob);
+      S.expFrames = new Map([[c.id, { frame: await fs.frameAt(1), rotation: fs.rotation }]]);
+      renderFrame(1);
+      const B = st.ctx.getImageData(0, 0, S.W, S.H).data;
+      S.expFrames = null;
+      fs.close();
+      S.clips = saved;
+      S.expFast = false;
+      let d = 0;
+      for (let i = 0; i < A.length; i += 4)
+        d += Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]);
+      return { size: el.videoWidth + '×' + el.videoHeight, rotation: fs.rotation, diff: d / ((A.length / 4) * 3) };
+    });
+    check(
+      rot.diff < 4,
+      `cuadro girado igual que en <video> (${rot.size}, ${rot.rotation}°, diferencia ${rot.diff.toFixed(1)}/255)`
+    );
+    await page.close();
+  }
+
+  // Demuxer contra ffprobe: muestras, tiempos (con cuadros B), tamaños, keyframes y posiciones
+  console.log('\nDemuxer (contra ffprobe)');
+  const { demux } = await import(require('url').pathToFileURL(path.join(ROOT, 'js', 'demux.js')));
+  for (const f of [FIX, ...Object.values(extra)]) {
+    const r = await demux(new Blob([fs.readFileSync(f)]));
+    const pk = ffprobePackets(f),
+      webm = /\.webm$/.test(f);
+    let bad = 0;
+    pk.forEach(([pts, size, pos, flags], i) => {
+      const s = r && r.samples[i];
+      // En WebM, ffprobe da la posición del bloque y el demuxer la del cuadro (4 bytes después)
+      if (
+        !s ||
+        Math.abs(s.ts / 1e6 - +pts) > 0.0011 ||
+        s.size !== +size ||
+        s.key !== flags.startsWith('K') ||
+        s.off !== +pos + (webm ? 4 : 0)
+      )
+        bad++;
+    });
+    check(
+      r && r.samples.length === pk.length && !bad,
+      `${path.basename(f)}: ${r ? r.codec + ', ' + r.samples.length + ' muestras' : 'no reconocido'}${r && r.rotation ? ', ' + r.rotation + '°' : ''}`
+    );
   }
 
   await browser.close();

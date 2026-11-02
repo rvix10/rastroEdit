@@ -13,8 +13,8 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Verificar sintaxis: `for f in js/*.js; do node --check --input-type=module < $f; done`
 - Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
 - Prueba de humo: `node tests/smoke.cjs` — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
-  del reloj con el video, exportación con pausa en segundo plano, archivo `.rastro` (también en un navegador
-  sin datos) y limpieza de videos. Genera
+  del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
+  rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
@@ -26,7 +26,8 @@ python3 -m http.server 8080   # abrir http://localhost:8080
     -filter_complex "[0:v]hue=s=0.35,eq=brightness=-0.15[bg];[1:v]format=yuv420p[ob];[bg][ob]overlay=x='80+t*240':y='300+120*sin(t*2)':eval=frame,format=yuv420p[v]" \
     -map "[v]" -map 2:a -c:v libvpx -b:v 3M -c:a libopus test.webm
   ```
-  Usar WebM/VP8: el Chromium de Playwright no decodifica H.264.
+  Usar WebM/VP8 para importar: el `<video>` del Chromium de Playwright no reproduce H.264 (aunque `VideoDecoder`
+  y `VideoEncoder` sí lo soportan; AAC no se puede codificar ahí, por eso el audio sale en Opus).
 
 ## Arquitectura (`js/`)
 
@@ -41,7 +42,11 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `render.js` | `renderFrame(T)`: compone clips, transición, overlays y guías |
 | `playback.js` | Bucle `requestAnimationFrame`; al reproducir, el reloj del proyecto sigue al `<video>` activo (`videoClock`) |
 | `tracker.js` | Rastreo 2D por punto (ZNCC, desenfoque, plantilla adaptativa, subpíxel) |
-| `export.js` | `MediaRecorder` sobre `cv.captureStream()` + audio; se pausa si la pestaña pasa a segundo plano |
+| `export.js` | Elige cómo exportar: rápida (`fastexport.js`) o, si no hay WebCodecs o falla, `MediaRecorder` en tiempo real (`S.fastBroken`) |
+| `fastexport.js` | Exportación con WebCodecs: cuadro por cuadro (`renderFrame` + `VideoEncoder`), audio mezclado con `OfflineAudioContext` + `AudioEncoder` |
+| `frames.js` | `FrameSource`: cuadro exacto de un video con `VideoDecoder` (decodifica en orden); `drawRotated()` |
+| `demux.js` | Índice de muestras de la pista de video de MP4/MOV y WebM/MKV (tiempos con cuadros B, rotación, listas de edición) |
+| `mp4.js` | `Mp4Muxer`: escribe el .mp4 (H.264/VP9/AV1 + AAC/Opus), `moov` al final |
 | `panel.js` | HTML del panel de herramientas por pestaña (`S.tab`) |
 | `timeline-ui.js` | Dibujo de la línea de tiempo |
 | `actions.js` | `act(nombre:arg)` despachado por `data-act`; eventos de puntero y teclado |
@@ -61,6 +66,10 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Archivo `.rastro`: zip con `project.json` (`{format:'rastro', v, name, data, media:[{id,name,type,file}]}`) y
   `media/<mediaId>.<ext>`. Si cambia la forma de `data`, sube `RASTRO_V` en `project.js` y mantén la lectura de versiones viejas.
   Al abrirlo siempre se crea un proyecto nuevo.
+- Exportación rápida: mientras corre, `S.expFast` hace que el bucle de `playback.js` no mueva los videos ni dibuje;
+  `S.expFrames` (clip → cuadro decodificado) tiene prioridad sobre `c.el` en `drawClipLayer`. Un clip cuyo archivo no se
+  puede demuxar/decodificar cae a seek en su `<video>` (exacto pero lento: cada seek decodifica desde el keyframe).
+  Si cambias cómo se mezcla el audio en `syncMedia()`, cambia también `mixAudio()`.
 - Coordenadas: el rastreo guarda `x,y` normalizados (0–1) **en el espacio del video fuente**; `mapSrc()` los lleva al lienzo.
   Overlays con `follow:true` guardan `x,y` como **desplazamiento** respecto al punto rastreado (normalizado al lienzo).
 - UI con `data-act="accion:arg"`, `data-tab`, `data-k` (inputs). No usar `alert/confirm/prompt`: confirmaciones dentro de la página.
@@ -73,5 +82,4 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 1. Tracking de 2 puntos: posición + rotación + escala; overlays que hereden rotación/escala.
 2. Tracking planar de 4 esquinas (homografía) para reemplazar pantallas/letreros en perspectiva.
 3. Pista de música y volumen por clip.
-4. Exportación más rápida que tiempo real con WebCodecs (hoy `MediaRecorder` va a 1×).
-5. Arrastrar clips para reordenar y recortar desde los bordes en la línea de tiempo.
+4. Arrastrar clips para reordenar y recortar desde los bordes en la línea de tiempo.
