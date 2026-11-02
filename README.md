@@ -10,6 +10,7 @@ Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 |---|---|
 | **Medios** | Importa varios videos (MP4, WebM, MOV según el navegador). Formato del proyecto 16:9, 9:16 o 1:1. |
 | **Editar** | Recorte de inicio y fin, dividir en el cursor, duplicar, reordenar, silenciar, filtros (Cálido, Frío, B/N, Vívido, Cine). |
+| **Tablet y celular** | En pantallas táctiles los controles miden al menos 44 px. En vertical, la vista previa y la línea de tiempo quedan fijas y solo se desplaza el panel. |
 | **Línea de tiempo táctil** | Deslizar para desplazar, dos dedos para zoom, mantener presionado un clip y arrastrarlo para reordenar, bordes del clip seleccionado para recortar (con mouse: arrastrar directo y Ctrl + rueda). |
 | **Transiciones** | Corte, Fundido, Destello, Deslizar, Empujar, Zoom, Giro, Barrido, Círculo, Desenfoque y Glitch, con duración ajustable. Los clips se superponen durante la transición y el audio hace crossfade. |
 | **Rastreo** | Marcas un punto y el editor lo sigue cuadro a cuadro, hacia adelante y hacia atrás. Con **2 puntos** sobre el mismo objeto mide también su giro y su escala: los textos y stickers que lo siguen giran y cambian de tamaño con él (se puede apagar cada cosa por elemento). |

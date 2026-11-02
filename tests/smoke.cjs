@@ -1,6 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
 //   node tests/smoke.cjs                 todo
-//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tactil, 2puntos, rotacion, demux)
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, 2puntos, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -468,6 +468,91 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
       await ctx.close();
     }
+  }
+
+  // Tablet y celular: objetivos táctiles de 44 px y diseño vertical con vista previa fija
+  if (run('tablet')) {
+    console.log('\nTablet y celular (pantalla táctil)');
+    for (const [name, w, h] of [
+      ['tablet vertical', 800, 1280],
+      ['celular', 390, 844],
+      ['tablet horizontal', 1280, 800],
+    ]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true });
+      const page = await ctx.newPage();
+      await page.goto(url);
+      await until(page, async () => {
+        const { S } = await import('/js/state.js');
+        return S.clips.length === 3 && !S.tracking;
+      });
+      const small = new Set();
+      for (const tab of ['media', 'edit', 'trans', 'track', 'text', 'export', 'projects']) {
+        await page.evaluate(async t => {
+          const { S } = await import('/js/state.js');
+          if (t === 'text') S.selOv = S.ovs[0].id;
+          (await import('/js/panel.js')).setTab(t);
+        }, tab);
+        await page.waitForTimeout(100);
+        const r = await page.evaluate(() => {
+          const out = [];
+          for (const e of document.querySelectorAll(
+            'button,[data-act],[data-tab],input,textarea,label.btn,label.chk'
+          )) {
+            if ((e.closest('.chk') && e.tagName === 'INPUT') || e.closest('.clip') || e.matches('.ovb')) continue;
+            const b = e.getBoundingClientRect();
+            if (!b.width || !b.height || e.type === 'file' || e.hidden) continue;
+            // Las insignias de transición se ven chicas pero su área táctil (::before) mide 44×44
+            if (e.matches('.tbtn')) {
+              const v = document.querySelector('#tlScroll').getBoundingClientRect();
+              if (b.left < v.left + 20 || b.right > v.right - 20) continue; // fuera de la vista: no se puede tocar
+              const hit = [
+                [0, -18],
+                [0, 18],
+                [-18, 0],
+              ].every(([dx, dy]) => {
+                const x = document.elementFromPoint(b.x + b.width / 2 + dx, b.y + b.height / 2 + dy);
+                return x && x.closest('.tbtn') === e;
+              });
+              if (!hit) out.push('insignia de transición');
+              continue;
+            }
+            if (b.height < 43.5 || (b.width < 43.5 && e.type !== 'range'))
+              out.push(
+                (e.getAttribute('aria-label') || e.textContent || e.tagName).trim().slice(0, 20) +
+                  ` ${Math.round(b.width)}×${Math.round(b.height)}`
+              );
+          }
+          return out;
+        });
+        r.forEach(x => small.add(x));
+      }
+      check(
+        !small.size,
+        `${name}: todo lo tocable mide al menos 44 px` + (small.size ? ': ' + [...small].join(' · ') : '')
+      );
+      const lay = await page.evaluate(() => {
+        const pn = document.querySelector('#panel'),
+          top = () => Math.round(document.querySelector('#stage').getBoundingClientRect().top);
+        const t0 = top();
+        pn.scrollTop = 300;
+        return {
+          page: document.documentElement.scrollHeight - innerHeight,
+          h: document.documentElement.scrollWidth - innerWidth,
+          fixed: top() === t0,
+        };
+      });
+      check(
+        lay.page <= 0 && lay.h <= 0 && lay.fixed,
+        `${name}: la página no se desplaza; el panel sí, con la vista previa fija`
+      );
+      await ctx.close();
+    }
+    // En PC con mouse se mantiene el diseño compacto
+    const pc = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await pc.goto(url);
+    const hb = await pc.evaluate(() => document.querySelector('#bUndo').getBoundingClientRect().height);
+    check(hb < 40, `PC con mouse: diseño compacto (deshacer mide ${Math.round(hb)} px)`);
+    await pc.close();
   }
 
   // Línea de tiempo táctil: gestos con mouse y con dedos reales (eventos táctiles del protocolo de Chrome)
