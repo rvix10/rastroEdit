@@ -11,6 +11,10 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 
 - Módulos ES nativos: no abrir `index.html` con `file://`.
 - Verificar sintaxis: `for f in js/*.js; do node --check --input-type=module < $f; done`
+- Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
+- Prueba de humo: `node tests/smoke.cjs` — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
+  del reloj con el video, exportación con pausa en segundo plano y limpieza de videos. Genera
+  `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
 - Para acceder al estado desde una prueba: `await import('/js/state.js')` y `await import('/js/project.js')` dentro de `page.evaluate` (mismas instancias de módulo).
@@ -34,14 +38,14 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `timeline.js` | `layout()` calcula `_start/_len/_d` (los clips se solapan en transiciones) |
 | `transitions.js` | `TR` (transiciones) y `applyFilter` |
 | `render.js` | `renderFrame(T)`: compone clips, transición, overlays y guías |
-| `playback.js` | Bucle `requestAnimationFrame`, sincronía de `<video>` con el tiempo del proyecto |
+| `playback.js` | Bucle `requestAnimationFrame`; al reproducir, el reloj del proyecto sigue al `<video>` activo (`videoClock`) |
 | `tracker.js` | Rastreo 2D por punto (ZNCC, desenfoque, plantilla adaptativa, subpíxel) |
-| `export.js` | `MediaRecorder` sobre `cv.captureStream()` + audio |
+| `export.js` | `MediaRecorder` sobre `cv.captureStream()` + audio; se pausa si la pestaña pasa a segundo plano |
 | `panel.js` | HTML del panel de herramientas por pestaña (`S.tab`) |
 | `timeline-ui.js` | Dibujo de la línea de tiempo |
 | `actions.js` | `act(nombre:arg)` despachado por `data-act`; eventos de puntero y teclado |
 | `store.js` | IndexedDB: `projects`, `media` (blobs de video), `meta` |
-| `project.js` | Serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer (`P`) |
+| `project.js` | Serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer (`P`), `collectMedia()` |
 
 ## Convenciones
 
@@ -50,6 +54,8 @@ python3 -m http.server 8080   # abrir http://localhost:8080
   `commit()` compara instantáneas, así que llamarlo sin cambios no hace nada.
 - Datos de un clip que se guardan: `CLIP_KEYS` en `project.js`. Si agregas un campo persistente, súmalo ahí.
   Lo que empieza con `_` (`_start`, `_lastT`…) y `el`, `scv`, `gain` es estado de ejecución.
+- Videos guardados (`media`): se borran con `collectMedia()` cuando ningún proyecto ni el historial de deshacer
+  los usa; corre al descartar el historial (abrir/crear proyecto, arranque) y al eliminar un proyecto.
 - Coordenadas: el rastreo guarda `x,y` normalizados (0–1) **en el espacio del video fuente**; `mapSrc()` los lleva al lienzo.
   Overlays con `follow:true` guardan `x,y` como **desplazamiento** respecto al punto rastreado (normalizado al lienzo).
 - UI con `data-act="accion:arg"`, `data-tab`, `data-k` (inputs). No usar `alert/confirm/prompt`: confirmaciones dentro de la página.

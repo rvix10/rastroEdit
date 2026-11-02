@@ -15,7 +15,7 @@ Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 | **Texto y stickers** | Texto (3 tipografías, contorno o caja), aro de enfoque y stickers. Cualquier elemento puede seguir el objeto rastreado y se arrastra sobre la vista previa. |
 | **Proyectos** | Autoguardado en el navegador (IndexedDB), con los videos incluidos. Lista de proyectos, nuevo, duplicar, renombrar y eliminar. Si falta un video, se marca y se puede volver a vincular. |
 | **Deshacer / rehacer** | Hasta 60 pasos. Botones en la barra superior, o `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`). `Ctrl+S` fuerza el guardado. |
-| **Exportar** | Graba el lienzo con `MediaRecorder` a MP4 (si el navegador lo soporta) o WebM, con audio. |
+| **Exportar** | Graba el lienzo con `MediaRecorder` a MP4 (si el navegador lo soporta) o WebM, con audio. Si cambias de pestaña, la grabación se pausa y sigue al volver. |
 
 ## Cómo correrlo
 
@@ -56,7 +56,17 @@ js/
   actions.js      acciones de UI y eventos de puntero/teclado
   store.js        acceso a IndexedDB (proyectos, videos, preferencias)
   project.js      serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer
+tests/smoke.cjs   prueba de humo en Chromium (Playwright)
 ```
+
+## Pruebas
+
+```bash
+node tests/smoke.cjs
+```
+
+Abre el editor en Chromium (Playwright) a 1280 y 390 px, importa un video de prueba generado con `ffmpeg`,
+rastrea un objeto de trayectoria conocida, exporta y revisa que no haya errores en la consola.
 
 ## Rastreo: cómo funciona
 
