@@ -1,6 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
 //   node tests/smoke.cjs                 todo
-//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, 2puntos, rotacion, demux)
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, 2puntos, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -953,6 +953,151 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       doc.v === 2 && mm && files.has(mm.file) && doc.data.clips[0].vol === 0.5,
       'el .rastro incluye la música (v2) y el volumen del clip'
     );
+    check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
+    await page.close();
+  }
+
+  // Exportar en 720p, 1080p y 4K con calidad elegible; el video se escribe en disco (OPFS)
+  if (run('export')) {
+    console.log('\nExportar: resolución, calidad y disco');
+    const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+    const errs = [];
+    page.on('pageerror', e => errs.push(e.message));
+    page.on('console', m => m.type() === 'error' && errs.push(m.text()));
+    await page.goto(url);
+    await until(page, async () => {
+      const { S } = await import('/js/state.js');
+      return S.clips.length === 3 && !S.tracking;
+    });
+    await page.click('[data-tab="export"]');
+    await until(
+      page,
+      () => !!document.querySelector('[data-act="expRes:2160"]') && !/Ligera.*disabled/.test(''),
+      null,
+      8000
+    );
+    // Exporta con lo elegido en el panel y guarda el archivo
+    const exportWith = async (res, q, mem = false) => {
+      await page.evaluate(
+        async ([m]) => {
+          (await import('/js/state.js')).S.forceMemSink = m;
+        },
+        [mem]
+      );
+      await page.click(`[data-act="expRes:${res}"]`);
+      await page.click(`[data-act="expQ:${q}"]`);
+      const est = await page.evaluate(() => {
+        const t = document.querySelector('.specs').innerText;
+        return t;
+      });
+      const prev = await page.evaluate(async () => {
+        const { S } = await import('/js/state.js');
+        return S.result && S.result.url;
+      });
+      await page.click('[data-act="export"]');
+      await until(
+        page,
+        async u => {
+          const { S } = await import('/js/state.js');
+          return S.result && S.result.url !== u && !S.exporting;
+        },
+        prev,
+        180000
+      );
+      const r = await page.evaluate(async () => {
+        const { S, cv } = await import('/js/state.js');
+        return { size: S.result.size, opfs: S.result.opfs, canvas: [cv.width, cv.height], base: [S.W, S.H] };
+      });
+      const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="save"]')]);
+      const f = path.join(__dirname, 'fixtures', `export-${res}-${q}${mem ? '-mem' : ''}.mp4`);
+      await dl.saveAs(f);
+      const [w, h, frames] = execFileSync('ffprobe', [
+        '-v',
+        'error',
+        '-select_streams',
+        'v',
+        '-show_entries',
+        'stream=width,height,nb_frames',
+        '-of',
+        'csv=p=0',
+        f,
+      ])
+        .toString()
+        .trim()
+        .split(',')
+        .map(Number);
+      return { ...r, w, h, frames, f, est: (est.match(/Peso\s*hasta ([\d,]+) MB/) || [])[1] };
+    };
+    const r720 = await exportWith(720, 'normal');
+    const r4k = await exportWith(2160, 'normal');
+    check(
+      r720.w === 1280 && r720.h === 720 && r4k.w === 3840 && r4k.h === 2160 && r4k.frames === 360,
+      `exporta en 720p (1280×720) y 4K (3840×2160) de verdad, no estirado`
+    );
+    check(
+      r4k.canvas.join() === '1280,720' && r4k.base.join() === '1280,720',
+      'después de exportar, la vista previa vuelve a su tamaño'
+    );
+    // Misma imagen a 720p y a 4K (textos, aro rastreado y transiciones escalan igual)
+    const gray = (f, t) =>
+      execFileSync('ffmpeg', [
+        '-loglevel',
+        'error',
+        '-ss',
+        '' + t,
+        '-i',
+        f,
+        '-frames:v',
+        '1',
+        '-vf',
+        'scale=640:360',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'gray',
+        '-',
+      ]);
+    let diff = 0;
+    for (const t of [1.5, 4.3, 6]) {
+      const a = gray(r720.f, t),
+        b = gray(r4k.f, t);
+      let d = 0;
+      for (let i = 0; i < a.length; i++) d += Math.abs(a[i] - b[i]);
+      diff = Math.max(diff, d / a.length);
+    }
+    check(diff < 2, `la composición es la misma en 720p y 4K (diferencia ${diff.toFixed(2)}/255)`);
+    // Calidad: más calidad, más peso; el peso real no pasa del máximo que muestra el panel
+    const rl = await exportWith(1080, 'ligera'),
+      rn = await exportWith(1080, 'normal'),
+      ra = await exportWith(1080, 'alta');
+    check(
+      rl.size < rn.size && rn.size < ra.size,
+      `calidad Ligera < Normal < Alta (${[rl, rn, ra].map(x => (x.size / 1048576).toFixed(1)).join(' < ')} MB)`
+    );
+    const estN = parseFloat((rn.est || '0').replace(',', '.')) * 1048576;
+    check(
+      rn.size <= estN * 1.05 && rn.size > estN * 0.4,
+      `el peso real no pasa del máximo del panel (${(rn.size / 1048576).toFixed(1)} MB de hasta ${rn.est} MB)`
+    );
+    // En disco (OPFS) y en memoria dan el mismo resultado; en disco queda solo el último
+    const rm = await exportWith(1080, 'normal', true);
+    check(
+      rn.opfs && !rm.opfs && Math.abs(rm.size - rn.size) / rn.size < 0.02,
+      'el video se escribe en disco (y en memoria si no hay disco) con el mismo resultado'
+    );
+    const left = await page.evaluate(async () => {
+      const r = await navigator.storage.getDirectory(),
+        n = [];
+      for await (const k of r.keys()) n.push(k);
+      return n.filter(k => k.startsWith('rastro-export-'));
+    });
+    check(left.length <= 1, `en disco queda como mucho el último video exportado (${left.length})`);
+    // La elección se recuerda
+    await page.reload();
+    await page.click('[data-tab="export"]');
+    await until(page, () => !!document.querySelector('[data-act="expQ:normal"][aria-pressed="true"]'), null, 8000);
+    const kept = await page.evaluate(() => !!document.querySelector('[data-act="expRes:1080"][aria-pressed="true"]'));
+    check(kept, 'la resolución y la calidad elegidas se recuerdan');
     check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
     await page.close();
   }

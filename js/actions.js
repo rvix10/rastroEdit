@@ -5,7 +5,7 @@ import { layout, activeAt, localOf } from './timeline.js';
 import { ovPos, ovSetAbs } from './render.js';
 import { play, pause, seek } from './playback.js';
 import { runTrack } from './tracker.js';
-import { startExport, cancelExport, saveResult } from './export.js';
+import { startExport, cancelExport, saveResult, setExportOpt } from './export.js';
 import { renderTabs, setTab, renderPanel } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
 import { zoomAt } from './timeline-touch.js';
@@ -372,6 +372,14 @@ export function act(a, el) {
           if (S.tab === 'projects') renderPanel();
         }, 4000);
       }
+      break;
+    case 'expRes':
+      setExportOpt({ res: +arg });
+      renderPanel();
+      break;
+    case 'expQ':
+      setExportOpt({ q: arg });
+      renderPanel();
       break;
     case 'delMusic':
       S.music = null;

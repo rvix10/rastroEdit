@@ -3,7 +3,16 @@ import { toast, saveBlob } from './util.js';
 import { ensureAudio } from './clips.js';
 import { play, pause } from './playback.js';
 import { renderPanel } from './panel.js';
-import { fastCodecs, exportFast, codecName } from './fastexport.js';
+import {
+  fastCodecs,
+  exportFast,
+  codecName,
+  exportSize,
+  estimateBytes,
+  RESOLUTIONS,
+  QUALITIES,
+  cleanExports,
+} from './fastexport.js';
 
 /* ---------- exportación ---------- */
 export function pickMime() {
@@ -25,36 +34,83 @@ export function pickMime() {
     }) || ''
   );
 }
-/** Cómo se va a exportar con el tamaño actual (para el panel). */
-export function exportInfo() {
-  const key = S.W + 'x' + S.H;
-  if (!S.fastBroken && (!S.fastInfo || S.fastInfo.key !== key)) {
-    const info = (S.fastInfo = { key, codecs: undefined });
-    fastCodecs().then(c => {
-      info.codecs = c;
-      if (S.fastInfo === info && S.tab === 'export' && !S.exporting) renderPanel();
-    });
-  }
-  const c = !S.fastBroken && S.fastInfo && S.fastInfo.codecs;
-  if (c) return { fast: true, ok: true, fmt: 'MP4 · ' + codecName(c.video) + (c.audio ? '' : ' · sin audio') };
-  const mime = pickMime();
-  return { fast: false, ok: mime !== null, fmt: mime === null ? 'No disponible' : /mp4/.test(mime) ? 'MP4' : 'WebM' };
+/* --- resolución y calidad elegidas: preferencia de este navegador (no del proyecto) --- */
+const PREF = 'rastro.export';
+S.expOpt = { res: 1080, q: 'normal' };
+try {
+  const v = JSON.parse(localStorage.getItem(PREF) || 'null');
+  if (v && RESOLUTIONS[v.res] && QUALITIES[v.q]) S.expOpt = { res: +v.res, q: v.q };
+} catch (e) {}
+export function setExportOpt(patch) {
+  Object.assign(S.expOpt, patch);
+  try {
+    localStorage.setItem(PREF, JSON.stringify(S.expOpt));
+  } catch (e) {}
 }
-function setResult(blob, ext, took) {
+// Al abrir la app no se muestra ningún resultado: se borran los videos exportados que quedaron en disco
+cleanExports();
+
+/** Cómo se va a exportar (para el panel): qué resoluciones admite este navegador, tamaño y peso estimado. */
+export function exportInfo() {
+  const key = S.aspect;
+  if (!S.fastBroken && (!S.fastInfo || S.fastInfo.key !== key)) {
+    const info = (S.fastInfo = { key, sizes: {} });
+    for (const r of Object.keys(RESOLUTIONS)) {
+      const [w, h] = exportSize(S.aspect, +r);
+      info.sizes[r] = { w, h, codecs: undefined };
+      fastCodecs(w, h).then(c => {
+        info.sizes[r].codecs = c;
+        if (S.fastInfo === info && S.tab === 'export' && !S.exporting) renderPanel();
+      });
+    }
+  }
+  const sizes = !S.fastBroken && S.fastInfo ? S.fastInfo.sizes : null;
+  const any = sizes && Object.values(sizes).some(x => x.codecs);
+  if (any) {
+    // Si la resolución elegida no se puede aquí, la más alta que sí, por debajo
+    let res = S.expOpt.res;
+    if (!sizes[res].codecs)
+      res = +Object.keys(sizes)
+        .filter(r => sizes[r].codecs && +r <= res)
+        .concat(Object.keys(sizes).filter(r => sizes[r].codecs))[0];
+    const s = sizes[res],
+      c = s.codecs;
+    return {
+      fast: true,
+      ok: true,
+      res,
+      sizes,
+      w: s.w,
+      h: s.h,
+      est: estimateBytes(s.w, s.h, S.expOpt.q, S.total),
+      fmt: 'MP4 · ' + codecName(c.video) + (c.audio ? '' : ' · sin audio'),
+    };
+  }
+  const mime = pickMime();
+  return {
+    fast: false,
+    ok: mime !== null,
+    w: S.W,
+    h: S.H,
+    fmt: mime === null ? 'No disponible' : /mp4/.test(mime) ? 'MP4' : 'WebM',
+  };
+}
+function setResult(blob, ext, took, extra = {}) {
   if (S.result) URL.revokeObjectURL(S.result.url);
-  S.result = { blob, ext, url: URL.createObjectURL(blob), size: blob.size, took };
+  S.result = { blob, ext, url: URL.createObjectURL(blob), size: blob.size, took, ...extra };
 }
 
 export async function startExport() {
   if (!S.clips.length || S.exporting) return;
   pause();
   S.selOv = null;
-  const codecs = S.fastBroken ? null : await fastCodecs();
-  if (codecs) startFast();
+  const info = exportInfo();
+  const codecs = S.fastBroken || !info.fast ? null : await fastCodecs(info.w, info.h);
+  if (codecs) startFast(info.res);
   else startRealtime();
 }
 
-async function startFast() {
+async function startFast(res) {
   S.exporting = true;
   S.expFast = true;
   S.expCancel = false;
@@ -64,10 +120,13 @@ async function startFast() {
   let r = null,
     err = null;
   try {
-    r = await exportFast(p => {
-      const b = $('#expBar');
-      if (b) b.style.width = p * 100 + '%';
-    });
+    r = await exportFast(
+      p => {
+        const b = $('#expBar');
+        if (b) b.style.width = p * 100 + '%';
+      },
+      { res, q: S.expOpt.q }
+    );
   } catch (e) {
     err = e;
   }
@@ -76,6 +135,11 @@ async function startFast() {
   S.expFast = false;
   S.expCancel = false;
   S.expHidden = false;
+  if (err && err.name === 'QuotaExceededError') {
+    toast('No queda espacio en este dispositivo para exportar el video. Prueba con menos resolución o calidad.');
+    renderPanel();
+    return;
+  }
   if (err) {
     console.warn('Exportación rápida', err);
     S.fastBroken = true;
@@ -85,7 +149,8 @@ async function startFast() {
   }
   if (r && !cancelled) {
     const took = (performance.now() - t0) / 1000;
-    setResult(r.blob, r.ext, took);
+    setResult(r.blob, r.ext, took, { w: r.w, h: r.h, opfs: r.opfs });
+    cleanExports(r.opfs); // el resultado anterior ya no se muestra: se borra del disco
     toast('Video exportado');
   }
   renderPanel();

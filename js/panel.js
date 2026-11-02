@@ -2,6 +2,7 @@ import { $, panel, S } from './state.js';
 import { esc, fmtS, fmtT, getSel, getOv } from './util.js';
 import { TR, FILTERS } from './transitions.js';
 import { exportInfo, cancelExport } from './export.js';
+import { RESOLUTIONS, QUALITIES } from './fastexport.js';
 import { act } from './actions.js';
 import { P, refreshList } from './project.js';
 import { MUSIC_ACCEPT } from './music.js';
@@ -231,8 +232,26 @@ export function renderPanel() {
     }
   } else if (S.tab === 'export') {
     const info = exportInfo();
+    const busy = S.exporting ? 'disabled' : '';
+    // Resolución y calidad (solo con la exportación rápida; la de tiempo real graba el tamaño del proyecto)
+    const opts = info.fast
+      ? `<div class="lbl">Resolución</div>
+    <div class="seg" role="group" aria-label="Resolución">${Object.entries(RESOLUTIONS)
+      .map(([r, n]) => {
+        const s = info.sizes[r],
+          no = s.codecs === null;
+        return `<button data-act="expRes:${r}" aria-pressed="${info.res === +r}" ${no || S.exporting ? 'disabled' : ''} title="${no ? 'Este navegador no puede codificar ' + n : s.w + ' × ' + s.h}">${n}</button>`;
+      })
+      .join('')}</div>
+    ${Object.values(info.sizes).some(s => s.codecs === null) ? '<p class="note">Las resoluciones apagadas no las puede codificar este navegador.</p>' : ''}
+    <div class="lbl">Calidad</div>
+    <div class="seg" role="group" aria-label="Calidad">${Object.entries(QUALITIES)
+      .map(([k, q]) => `<button data-act="expQ:${k}" aria-pressed="${S.expOpt.q === k}" ${busy}>${q.n}</button>`)
+      .join('')}</div>`
+      : '';
     h = `<h2>Exportar</h2>
-    <dl class="specs"><dt>Resolución</dt><dd>${S.W} × ${S.H}</dd><dt>Duración</dt><dd>${fmtT(S.total)}</dd><dt>Cuadros</dt><dd>30 fps</dd><dt>Formato</dt><dd>${info.fmt}</dd></dl>
+    ${opts}
+    <dl class="specs"><dt>Tamaño</dt><dd>${info.w} × ${info.h}</dd><dt>Duración</dt><dd>${fmtT(S.total)}</dd><dt>Cuadros</dt><dd>30 fps</dd><dt>Formato</dt><dd>${info.fmt}</dd>${info.est ? `<dt>Peso</dt><dd>hasta ${mb(info.est)}</dd>` : ''}</dl>
     <p class="note">${
       info.fast
         ? 'Se arma cuadro por cuadro, más rápido que tiempo real. Si cambias de pestaña, se pausa y sigue cuando vuelvas.'
@@ -241,7 +260,7 @@ export function renderPanel() {
     ${S.exporting ? `<div class="prog"><i id="expBar" style="transition:none"></i></div><button data-act="cancelExport">Detener exportación</button>` : `<button class="primary" data-act="export" ${S.clips.length && info.ok ? '' : 'disabled'}>Exportar video</button>`}
     ${
       S.result && !S.exporting
-        ? `<div class="lbl">Resultado · ${(S.result.size / 1048576).toFixed(1).replace('.', ',')} MB${S.result.took ? ' · listo en ' + fmtS(S.result.took) : ''}</div><video class="result" src="${S.result.url}" controls playsinline></video>
+        ? `<div class="lbl">Resultado · ${S.result.w ? RESOLUTIONS[Math.min(S.result.w, S.result.h)] + ' · ' : ''}${mb(S.result.size)}${S.result.took ? ' · listo en ' + fmtS(S.result.took) : ''}</div><video class="result" src="${S.result.url}" controls playsinline></video>
       <button class="primary" data-act="save">Guardar archivo .${S.result.ext}</button><p class="note" id="saveMsg"></p>`
         : ''
     }`;

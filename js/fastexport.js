@@ -5,26 +5,50 @@
    y se codifica con AudioEncoder. mp4.js junta todo en un .mp4.
    Si la pestaña pasa a segundo plano se pausa (los videos ocultos pueden dejar de decodificar).
 */
-import { cv, S } from './state.js';
+import { cv, S, ASPECTS, sizeLayers } from './state.js';
 import { clamp, ease } from './util.js';
 import { activeAt, localOf } from './timeline.js';
 import { renderFrame } from './render.js';
 import { P } from './project.js';
-import { Mp4Muxer } from './mp4.js';
+import { Mp4Muxer, MemorySink, OpfsSink } from './mp4.js';
 import { FrameSource } from './frames.js';
 import { mixMusic } from './music.js';
 
 export const FPS = 30;
 const SR = 48000;
-// Nivel 4.0 alcanza para 1280×720, 720×1280 y 1080×1080 a 30 fps
-const VIDEO_CODECS = ['avc1.640028', 'avc1.4d0028', 'avc1.42e028', 'vp09.00.40.08', 'av01.0.08M.08'];
 const AUDIO_CODECS = ['mp4a.40.2', 'opus'];
 export const codecName = c => (!c ? '' : c.startsWith('avc1') ? 'H.264' : c.startsWith('vp09') ? 'VP9' : 'AV1');
 
-const bitrateFor = (w, h) => Math.round(clamp(w * h * FPS * 0.2, 2e6, 12e6));
+/* --- resolución y calidad de salida --- */
+// Lado corto del video exportado. El proyecto se dibuja a esa resolución (texto y bordes nítidos, no estirados).
+export const RESOLUTIONS = { 720: '720p', 1080: '1080p', 2160: '4K' };
+// Bits por píxel y cuadro: Normal ≈ 8 Mb/s en 1080p y ≈ 32 Mb/s en 4K (lo que piden YouTube y las redes)
+export const QUALITIES = {
+  ligera: { n: 'Ligera', bpp: 0.07 },
+  normal: { n: 'Normal', bpp: 0.13 },
+  alta: { n: 'Alta', bpp: 0.2 },
+};
+/** Tamaño de salida (pares) para el formato del proyecto y el lado corto pedido. */
+export function exportSize(aspect, res) {
+  const [bw, bh] = ASPECTS[aspect] || ASPECTS['16:9'],
+    k = res / Math.min(bw, bh);
+  return [Math.round((bw * k) / 2) * 2, Math.round((bh * k) / 2) * 2];
+}
+export const bitrateFor = (w, h, q = 'normal') =>
+  Math.round(clamp(w * h * FPS * (QUALITIES[q] || QUALITIES.normal).bpp, 1e6, 80e6));
+/** Peso máximo aproximado del archivo (bytes): el bitrate es variable y en escenas simples usa menos. */
+export const estimateBytes = (w, h, q, dur) => ((bitrateFor(w, h, q) + 160000) * dur) / 8;
+
+// El nivel del códec depende del tamaño: hasta 1080p alcanza el 4.0; para 4K hace falta el 5.1
+function videoCodecs(w, h) {
+  const big = Math.ceil(w / 16) * Math.ceil(h / 16) > 8192;
+  return big
+    ? ['avc1.640033', 'avc1.4d0033', 'vp09.00.51.08', 'av01.0.12M.08']
+    : ['avc1.640028', 'avc1.4d0028', 'avc1.42e028', 'vp09.00.40.08', 'av01.0.08M.08'];
+}
 const cache = new Map();
 
-/** Códecs que este navegador puede usar para el tamaño dado, o null si no hay WebCodecs. */
+/** Códecs que este navegador puede usar para el tamaño dado, o null si no hay WebCodecs o no llega a ese tamaño. */
 export function fastCodecs(w = S.W, h = S.H) {
   const key = w + 'x' + h;
   if (!cache.has(key)) cache.set(key, probe(w, h));
@@ -34,7 +58,7 @@ async function probe(w, h) {
   if (!('VideoEncoder' in window) || !('VideoFrame' in window) || !('OfflineAudioContext' in window)) return null;
   let video = null,
     audio = null;
-  for (const codec of VIDEO_CODECS) {
+  for (const codec of videoCodecs(w, h)) {
     try {
       const r = await VideoEncoder.isConfigSupported(videoConfig(codec, w, h));
       if (r.supported) {
@@ -56,8 +80,8 @@ async function probe(w, h) {
     }
   return { video, audio };
 }
-function videoConfig(codec, w, h) {
-  const c = { codec, width: w, height: h, bitrate: bitrateFor(w, h), framerate: FPS, latencyMode: 'quality' };
+function videoConfig(codec, w, h, q) {
+  const c = { codec, width: w, height: h, bitrate: bitrateFor(w, h, q), framerate: FPS, latencyMode: 'quality' };
   if (codec.startsWith('avc1')) c.avc = { format: 'avc' };
   return c;
 }
@@ -155,17 +179,65 @@ const visible = () =>
     document.addEventListener('visibilitychange', f);
   });
 
+/* --- archivos exportados en disco (OPFS) --- */
+const OPFS_PREFIX = 'rastro-export-';
+const hasOpfs = () =>
+  !!(
+    navigator.storage &&
+    navigator.storage.getDirectory &&
+    'createWritable' in (window.FileSystemFileHandle || {}).prototype
+  );
+/** Borra los videos exportados que quedaron en disco, salvo `keep` (el resultado que se está mostrando). */
+export async function cleanExports(keep = null) {
+  if (!hasOpfs()) return;
+  try {
+    const root = await navigator.storage.getDirectory();
+    for await (const name of root.keys())
+      if (name.startsWith(OPFS_PREFIX) && name !== keep) await root.removeEntry(name).catch(() => {});
+  } catch (e) {}
+}
+
 /**
- * Exporta el proyecto. onProgress(0..1). Devuelve { blob, ext } o null si se canceló.
- * Lanza un error si el navegador falla a mitad de camino.
+ * Exporta el proyecto. opt = { res: 720 | 1080 | 2160, q: 'ligera' | 'normal' | 'alta' }. onProgress(0..1).
+ * Devuelve { blob, ext, codec, w, h, opfs } o null si se canceló. Lanza un error si el navegador falla a mitad de camino.
+ * El proyecto se dibuja a la resolución de salida (S.W/S.H cambian durante la exportación y se restauran al final).
  */
-export async function exportFast(onProgress) {
-  const codecs = await fastCodecs(S.W, S.H);
-  if (!codecs) throw new Error('Sin WebCodecs');
+export async function exportFast(onProgress, opt = {}) {
+  const q = QUALITIES[opt.q] ? opt.q : 'normal',
+    [W, H] = exportSize(S.aspect, RESOLUTIONS[opt.res] ? +opt.res : 1080);
+  const codecs = await fastCodecs(W, H);
+  if (!codecs) throw new Error('Sin WebCodecs para ' + W + '×' + H);
+  // En disco si se puede (el video no queda en memoria); si no, en memoria
+  let sink = null;
+  if (hasOpfs() && !S.forceMemSink) {
+    await cleanExports(S.result && S.result.opfs);
+    try {
+      sink = await OpfsSink.create(OPFS_PREFIX + Date.now().toString(36) + '.mp4');
+    } catch (e) {
+      sink = null;
+    }
+  }
+  if (!sink) sink = new MemorySink();
+  const base = [S.W, S.H];
+  S.W = W;
+  S.H = H;
+  sizeLayers();
+  try {
+    const r = await encodeProject(onProgress, W, H, q, codecs, sink);
+    if (!r) await sink.discard();
+    return r && { ...r, w: W, h: H, opfs: sink instanceof OpfsSink ? sink.name : null };
+  } catch (e) {
+    await sink.discard();
+    throw e;
+  } finally {
+    [S.W, S.H] = base;
+    sizeLayers();
+  }
+}
+
+async function encodeProject(onProgress, W, H, q, codecs, sink) {
   const clips = S.clips.slice(),
-    total = S.total,
-    W = S.W,
-    H = S.H;
+    total = S.total;
   for (const c of clips) if (c.el) c.el.pause();
 
   // 1. Audio (rápido: se mezcla todo de una vez)
@@ -176,6 +248,7 @@ export async function exportFast(onProgress) {
   const mux = new Mp4Muxer({
     video: { codec: codecs.video, width: W, height: H },
     audio: mixed ? { codec: codecs.audio, sampleRate: SR, channels: 2 } : null,
+    sink,
   });
   let fail = null;
   const onErr = e => (fail = fail || e);
@@ -219,7 +292,7 @@ export async function exportFast(onProgress) {
     }
   S.expFrames = new Map();
   const ve = new VideoEncoder({ output: (ch, meta) => mux.addVideo(ch, meta), error: onErr });
-  ve.configure(videoConfig(codecs.video, W, H));
+  ve.configure(videoConfig(codecs.video, W, H, q));
   const N = Math.max(1, Math.round(total * FPS)),
     dur = Math.round(1e6 / FPS);
   try {
@@ -260,6 +333,7 @@ export async function exportFast(onProgress) {
       ve.encode(vf, { keyFrame: i % (FPS * 2) === 0 });
       vf.close();
       while (ve.encodeQueueSize > 4) await drained(ve);
+      if (sink.pending > 32 << 20) await sink.flushed(); // si el disco va más lento, no acumular en memoria
       onProgress(0.03 + 0.97 * ((i + 1) / N));
     }
   } catch (e) {
@@ -276,5 +350,5 @@ export async function exportFast(onProgress) {
   await ve.flush();
   ve.close();
   if (fail) throw fail;
-  return { blob: mux.finish(), ext: 'mp4', codec: codecs.video };
+  return { blob: await mux.finish(), ext: 'mp4', codec: codecs.video };
 }

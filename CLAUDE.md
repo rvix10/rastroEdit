@@ -13,9 +13,9 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Verificar sintaxis: `for f in js/*.js; do node --check --input-type=module < $f; done`
 - Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
 - Prueba de humo: `node tests/smoke.cjs` (o solo algunas secciones: `node tests/smoke.cjs tactil 2puntos`;
-  secciones: basico, tablet, tactil, audio, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
+  secciones: basico, tablet, tactil, audio, export, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
   del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
-  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
+  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
@@ -48,10 +48,10 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `playback.js` | Bucle `requestAnimationFrame`; al reproducir, el reloj del proyecto sigue al `<video>` activo (`videoClock`) |
 | `tracker.js` | Rastreo 2D de 1 o 2 puntos (ZNCC, desenfoque, plantilla adaptativa, subpíxel; con 2 puntos, plantilla original deformada con el giro/escala previstos) |
 | `export.js` | Elige cómo exportar: rápida (`fastexport.js`) o, si no hay WebCodecs o falla, `MediaRecorder` en tiempo real (`S.fastBroken`) |
-| `fastexport.js` | Exportación con WebCodecs: cuadro por cuadro (`renderFrame` + `VideoEncoder`), audio mezclado con `OfflineAudioContext` + `AudioEncoder` |
+| `fastexport.js` | Exportación con WebCodecs: cuadro por cuadro (`renderFrame` + `VideoEncoder`) a 720p/1080p/4K (`exportSize`, `QUALITIES`), audio mezclado con `OfflineAudioContext` + `AudioEncoder`; escribe en disco (OPFS) |
 | `frames.js` | `FrameSource`: cuadro exacto de un video con `VideoDecoder` (decodifica en orden); `drawRotated()` |
 | `demux.js` | Índice de muestras de la pista de video de MP4/MOV y WebM/MKV (tiempos con cuadros B, rotación, listas de edición) |
-| `mp4.js` | `Mp4Muxer`: escribe el .mp4 (H.264/VP9/AV1 + AAC/Opus), `moov` al final |
+| `mp4.js` | `Mp4Muxer`: escribe el .mp4 a medida que llegan las muestras (H.264/VP9/AV1 + AAC/Opus, audio intercalado, `moov` al final) en un `OpfsSink` (disco) o `MemorySink` |
 | `panel.js` | HTML del panel de herramientas por pestaña (`S.tab`) |
 | `timeline-ui.js` | Dibujo de la línea de tiempo (clips con `data-id`; bordes de recorte `.th` en el seleccionado) |
 | `timeline-touch.js` | Gestos de la línea de tiempo: desplazar con inercia, regla, mantener y arrastrar para reordenar, bordes para recortar, dos dedos / Ctrl+rueda para zoom (`zoomAt`) |
@@ -76,6 +76,11 @@ python3 -m http.server 8080   # abrir http://localhost:8080
   `S.expFrames` (clip → cuadro decodificado) tiene prioridad sobre `c.el` en `drawClipLayer`. Un clip cuyo archivo no se
   puede demuxar/decodificar cae a seek en su `<video>` (exacto pero lento: cada seek decodifica desde el keyframe).
   Si cambias cómo se mezcla el audio en `syncMedia()`, cambia también `mixAudio()` (y la música: `syncMusic()` / `mixMusic()`).
+- Resolución de salida: durante la exportación rápida `S.W/S.H` (y el lienzo) pasan al tamaño de salida y se restauran
+  al terminar, así que todo lo que se dibuje debe depender de `S.W/S.H` (nunca píxeles fijos). El nivel del códec
+  depende del tamaño (4K necesita H.264 5.1). La resolución y calidad elegidas (`S.expOpt`) son preferencia del navegador
+  (`localStorage`), no del proyecto. Los videos exportados quedan en OPFS (`rastro-export-*.mp4`); se borran al abrir la
+  app y al terminar una exportación nueva (`cleanExports`).
 - Audio: cada clip tiene `vol` (0–2, sin valor = 1; también en `CLIP_KEYS`). `S.music = { mediaId, name, dur, vol, in, fadeIn,
   fadeOut, loop }` va en `content()` y en el `.rastro` (v2); su archivo vive en `media` como los videos (`collectMedia` y
   `loadMediaFor` lo consideran). En `hydrate()` se borran del clip los campos de `CLIP_KEYS` que no vienen en los datos,

@@ -1,6 +1,6 @@
 /* ---------- muxer MP4 mínimo (sin dependencias) ----------
    Junta lo que entregan VideoEncoder / AudioEncoder en un .mp4 normal (no fragmentado):
-   ftyp · mdat (muestras intercaladas por tiempo) · moov al final.
+   ftyp · mdat (se escribe a medida que llegan las muestras, con el audio intercalado por tiempo) · moov al final.
    Video: avc1 (H.264, con avcC del encoder), vp09 (VP9) o av01 (AV1, si el encoder da av1C).
    Audio: mp4a (AAC, con esds) u Opus (dOps).
    Supone que el encoder no reordena cuadros (sin cuadros B), que es lo que hace WebCodecs hoy.
@@ -57,26 +57,134 @@ function dOps(channels, sampleRate, head) {
   return box('dOps', u8(0, channels), u16(preSkip), u32(sampleRate), u16(0), u8(0));
 }
 
+/** Destino en memoria: el archivo se arma como Blob al final. */
+export class MemorySink {
+  constructor() {
+    this.parts = [];
+    this.pending = 0;
+  }
+  write(data) {
+    this.parts.push(data);
+  }
+  /** Sobrescribe bytes ya escritos (solo se usa para el encabezado de mdat). */
+  patch(pos, bytes) {
+    let o = 0;
+    for (const p of this.parts) {
+      if (pos >= o && pos + bytes.length <= o + p.length) return p.set(bytes, pos - o);
+      o += p.length;
+    }
+    throw new Error('Posición fuera del archivo');
+  }
+  async flushed() {}
+  async close() {
+    return new Blob(this.parts, { type: 'video/mp4' });
+  }
+  async discard() {
+    this.parts = [];
+  }
+}
+
+/**
+ * Destino en disco: Origin Private File System del navegador. El video no queda en memoria
+ * (a 4K son ~4 MB por segundo); al cerrar devuelve un File que se puede reproducir y descargar.
+ */
+export class OpfsSink {
+  static async create(name) {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle(name, { create: true });
+    const w = await fh.createWritable({ keepExistingData: false });
+    return new OpfsSink(root, fh, w, name);
+  }
+  constructor(root, fh, w, name) {
+    Object.assign(this, { root, fh, w, name, q: Promise.resolve(), err: null, pending: 0 });
+  }
+  _queue(fn, n) {
+    this.pending += n;
+    this.q = this.q
+      .then(fn)
+      .catch(e => (this.err = this.err || e))
+      .finally(() => (this.pending -= n));
+  }
+  write(data) {
+    this._queue(() => this.w.write(data), data.length);
+  }
+  patch(pos, bytes) {
+    this._queue(() => this.w.write({ type: 'write', position: pos, data: bytes }), bytes.length);
+  }
+  /** Espera a que lo encolado llegue al disco (para no acumular en memoria si el disco va más lento). */
+  async flushed() {
+    await this.q;
+    if (this.err) throw this.err;
+  }
+  async close() {
+    await this.flushed();
+    await this.w.close();
+    return this.fh.getFile();
+  }
+  async discard() {
+    try {
+      await this.q;
+      await this.w.abort();
+    } catch (e) {}
+    try {
+      await this.root.removeEntry(this.name);
+    } catch (e) {}
+  }
+}
+
 export class Mp4Muxer {
   /**
-   * @param {{ video: { codec, width, height }, audio?: { codec, sampleRate, channels } | null }} o
+   * Escribe el .mp4 a medida que llegan las muestras: ftyp · mdat (video con el audio intercalado por tiempo) · moov.
+   * @param {{ video: { codec, width, height }, audio?: { codec, sampleRate, channels } | null, sink?: MemorySink | OpfsSink }} o
    */
-  constructor({ video, audio = null }) {
+  constructor({ video, audio = null, sink = new MemorySink() }) {
+    this.sink = sink;
     this.tracks = [{ kind: 'video', ...video, timescale: 90000, samples: [], desc: null }];
     if (audio) this.tracks.push({ kind: 'audio', ...audio, timescale: audio.sampleRate, samples: [], desc: null });
+    this.pendingAudio = [];
+    this.videoTs = null;
+    this.off = 0;
   }
-  _add(t, chunk, meta) {
+  _read(t, chunk, meta) {
     if (meta && meta.decoderConfig && meta.decoderConfig.description && !t.desc)
       t.desc = toBytes(meta.decoderConfig.description).slice();
     const data = new Uint8Array(chunk.byteLength);
     chunk.copyTo(data);
-    t.samples.push({ data, ts: chunk.timestamp, dur: chunk.duration || 0, key: chunk.type === 'key' });
+    return { data, s: { ts: chunk.timestamp, dur: chunk.duration || 0, key: chunk.type === 'key' } };
+  }
+  _write(t, s, data) {
+    if (!this.off) {
+      const ftyp = box('ftyp', str('isom'), u32(512), str('isom'), str('iso2'), str('avc1'), str('mp41'));
+      this.sink.write(ftyp);
+      this.mdatPos = ftyp.length;
+      // mdat con tamaño de 64 bits (size = 1): se completa al final, sin importar cuánto pese
+      this.sink.write(cat(u32(1), str('mdat'), u64(0)));
+      this.off = ftyp.length + 16;
+    }
+    s.off = this.off;
+    s.size = data.length;
+    this.sink.write(data);
+    this.off += data.length;
+    t.samples.push(s);
+  }
+  _flushAudio(upto) {
+    const t = this.tracks[1];
+    while (this.pendingAudio.length && this.pendingAudio[0].s.ts <= upto) {
+      const a = this.pendingAudio.shift();
+      this._write(t, a.s, a.data);
+    }
   }
   addVideo(chunk, meta) {
-    this._add(this.tracks[0], chunk, meta);
+    const { data, s } = this._read(this.tracks[0], chunk, meta);
+    this._flushAudio(s.ts);
+    this._write(this.tracks[0], s, data);
+    this.videoTs = s.ts;
   }
   addAudio(chunk, meta) {
-    if (this.tracks[1]) this._add(this.tracks[1], chunk, meta);
+    const t = this.tracks[1];
+    if (!t) return;
+    this.pendingAudio.push(this._read(t, chunk, meta));
+    if (this.videoTs !== null) this._flushAudio(this.videoTs);
   }
 
   _entry(t) {
@@ -123,10 +231,11 @@ export class Mp4Muxer {
     );
   }
 
-  /** Arma el archivo. Devuelve un Blob video/mp4. */
-  finish() {
+  /** Cierra el archivo (escribe moov). Devuelve un Blob (memoria) o un File (disco). */
+  async finish() {
+    this._flushAudio(Infinity);
     const tracks = this.tracks.filter(t => t.samples.length);
-    if (!tracks.length || !this.tracks[0].samples.length) throw new Error('No hay cuadros de video');
+    if (!this.tracks[0].samples.length) throw new Error('No hay cuadros de video');
     // Duraciones en la escala de cada pista, a partir de las marcas de tiempo (µs)
     for (const t of tracks) {
       const s = t.samples,
@@ -134,22 +243,10 @@ export class Mp4Muxer {
       for (let i = 0; i < s.length; i++) {
         const next = i + 1 < s.length ? s[i + 1].ts : s[i].ts + (s[i].dur || (s[i - 1] ? s[i].ts - s[i - 1].ts : 0));
         s[i].d = Math.max(1, Math.round(next * k) - Math.round(s[i].ts * k));
-        s[i].sec = s[i].ts / 1e6;
       }
       t.total = s.reduce((a, x) => a + x.d, 0);
     }
-    // mdat: muestras intercaladas por tiempo
-    const all = tracks.flatMap(t => t.samples.map(x => ({ t, x }))).sort((a, b) => a.x.sec - b.x.sec);
-    const ftyp = box('ftyp', str('isom'), u32(512), str('isom'), str('iso2'), str('avc1'), str('mp41'));
-    const mdatBody = all.reduce((a, { x }) => a + x.data.length, 0);
-    const big = ftyp.length + 16 + mdatBody > 0xffffffff;
-    const mdatHead = big ? cat(u32(1), str('mdat'), u64(16 + mdatBody)) : cat(u32(8 + mdatBody), str('mdat'));
-    let off = ftyp.length + mdatHead.length;
-    for (const { x } of all) {
-      x.off = off;
-      off += x.data.length;
-    }
-
+    const big = this.off > 0xffffffff; // posiciones de 64 bits (co64) si el archivo pasa de 4 GB
     const movieDur = Math.max(...tracks.map(t => Math.round((t.total / t.timescale) * 1000)));
     const traks = tracks.map((t, i) => {
       const id = i + 1,
@@ -180,7 +277,7 @@ export class Mp4Muxer {
           0,
           u32(0),
           u32(s.length),
-          s.map(x => u32(x.data.length))
+          s.map(x => u32(x.size))
         ),
         big
           ? full(
@@ -254,6 +351,9 @@ export class Mp4Muxer {
       u32(tracks.length + 1)
     );
     const moov = box('moov', mvhd, ...traks);
-    return new Blob([ftyp, mdatHead, ...all.map(({ x }) => x.data), moov], { type: 'video/mp4' });
+    this.sink.write(moov);
+    // Tamaño real de mdat (encabezado de 64 bits reservado al empezar)
+    this.sink.patch(this.mdatPos + 8, u64(this.off - this.mdatPos));
+    return this.sink.close();
   }
 }
