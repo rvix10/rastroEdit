@@ -14,6 +14,7 @@ Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 | **Rastreo** | Marcas un punto y el editor lo sigue cuadro a cuadro, hacia adelante y hacia atrás. |
 | **Texto y stickers** | Texto (3 tipografías, contorno o caja), aro de enfoque y stickers. Cualquier elemento puede seguir el objeto rastreado y se arrastra sobre la vista previa. |
 | **Proyectos** | Autoguardado en el navegador (IndexedDB), con los videos incluidos. Lista de proyectos, nuevo, duplicar, renombrar y eliminar. Si falta un video, se marca y se puede volver a vincular. |
+| **Pasar a otro equipo** | *Guardar .rastro* crea un archivo con el proyecto y sus videos; *Abrir .rastro* lo agrega como proyecto nuevo en otro navegador o dispositivo. |
 | **Deshacer / rehacer** | Hasta 60 pasos. Botones en la barra superior, o `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`). `Ctrl+S` fuerza el guardado. |
 | **Exportar** | Graba el lienzo con `MediaRecorder` a MP4 (si el navegador lo soporta) o WebM, con audio. Si cambias de pestaña, la grabación se pausa y sigue al volver. |
 
@@ -55,7 +56,8 @@ js/
   timeline-ui.js  dibujo de la línea de tiempo
   actions.js      acciones de UI y eventos de puntero/teclado
   store.js        acceso a IndexedDB (proyectos, videos, preferencias)
-  project.js      serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer
+  project.js      serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer, archivo .rastro
+  archive.js      zip mínimo (sin dependencias) para los archivos .rastro
 tests/smoke.cjs   prueba de humo en Chromium (Playwright)
 ```
 
@@ -94,4 +96,4 @@ Precisión medida en pruebas: error promedio de ~2 px en el clip de ejemplo y de
 - [ ] Pista de música y control de volumen por clip
 - [ ] Exportación más rápida que tiempo real con WebCodecs
 - [x] Deshacer / rehacer
-- [ ] Exportar / importar proyecto como archivo (.rastro) para pasarlo a otro equipo
+- [x] Exportar / importar proyecto como archivo (.rastro) para pasarlo a otro equipo

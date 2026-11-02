@@ -20,6 +20,8 @@ import {
   renameProject,
   relink,
   refreshList,
+  exportProjectFile,
+  importProjectFile,
 } from './project.js';
 
 /* ---------- acciones ---------- */
@@ -355,6 +357,9 @@ export function act(a, el) {
         }, 4000);
       }
       break;
+    case 'exportProj':
+      exportProjectFile();
+      break;
     case 'relink': {
       const inp = $('#relinkIn');
       if (inp) {
@@ -380,6 +385,12 @@ panel.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'fileIn') {
     importFiles(t.files);
+    t.value = '';
+    return;
+  }
+  if (t.id === 'rastroIn') {
+    const f = t.files[0];
+    if (f) importProjectFile(f);
     t.value = '';
     return;
   }

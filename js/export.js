@@ -1,5 +1,5 @@
 import { $, cv, S } from './state.js';
-import { toast } from './util.js';
+import { toast, saveBlob } from './util.js';
 import { ensureAudio } from './clips.js';
 import { play, pause } from './playback.js';
 import { renderPanel } from './panel.js';
@@ -109,30 +109,8 @@ document.addEventListener('visibilitychange', () => {
 });
 
 export async function saveResult() {
-  const m = $('#saveMsg');
   if (!S.result) return;
-  const name = 'rastro-' + new Date().toISOString().slice(0, 10) + '.' + S.result.ext;
-  if (!S.dl) {
-    const a = document.createElement('a');
-    a.href = S.result.url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    if (m) m.textContent = 'Descarga iniciada: ' + name;
-    return;
-  }
-  try {
-    await S.dl.save({ filename: name, data: S.result.blob });
-    if (m) m.textContent = 'Archivo guardado.';
-  } catch (e) {
-    const c = e && e.code;
-    if (m)
-      m.textContent =
-        c === 'declined'
-          ? 'Descarga cancelada.'
-          : c === 'rate_limited'
-            ? 'Hay otra descarga pendiente; intenta de nuevo en un momento.'
-            : 'No se pudo guardar el archivo' + (e && e.message ? ': ' + e.message : '.');
-  }
+  const msg = await saveBlob(S.result.blob, 'rastro-' + new Date().toISOString().slice(0, 10) + '.' + S.result.ext);
+  const m = $('#saveMsg');
+  if (m) m.textContent = msg;
 }

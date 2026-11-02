@@ -18,13 +18,34 @@ function ensureFixture() {
   execFileSync(
     'ffmpeg',
     [
-      '-loglevel', 'error', '-y',
-      '-f', 'lavfi', '-i', 'testsrc2=s=1280x720:d=4:r=30',
-      '-f', 'lavfi', '-i', 'testsrc=s=60x60:d=4:r=30',
-      '-f', 'lavfi', '-i', 'sine=f=440:d=4',
+      '-loglevel',
+      'error',
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=s=1280x720:d=4:r=30',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc=s=60x60:d=4:r=30',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=f=440:d=4',
       '-filter_complex',
       "[0:v]hue=s=0.35,eq=brightness=-0.15[bg];[1:v]format=yuv420p[ob];[bg][ob]overlay=x='80+t*240':y='300+120*sin(t*2)':eval=frame,format=yuv420p[v]",
-      '-map', '[v]', '-map', '2:a', '-c:v', 'libvpx', '-b:v', '3M', '-c:a', 'libopus', FIX,
+      '-map',
+      '[v]',
+      '-map',
+      '2:a',
+      '-c:v',
+      'libvpx',
+      '-b:v',
+      '3M',
+      '-c:a',
+      'libopus',
+      FIX,
     ],
     { stdio: 'inherit' }
   );
@@ -96,7 +117,10 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       'importa un video WebM'
     );
     await page.evaluate(`(async () => { ${mods} ac.act('clearDemo'); })()`);
-    check((await page.evaluate(`(async () => { ${mods} return st.S.clips.length })()`)) === 1, 'quita los clips de ejemplo');
+    check(
+      (await page.evaluate(`(async () => { ${mods} return st.S.clips.length })()`)) === 1,
+      'quita los clips de ejemplo'
+    );
 
     // Rastreo: semilla en t = 1 s, comparar en t = 2 s y 3 s contra la posición real
     const seed = truth(1);
@@ -146,12 +170,57 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     const res = await page.evaluate(`(async () => { ${mods} return st.S.result.size })()`);
     check(res > 10000, `archivo exportado (${(res / 1024).toFixed(0)} KB)`);
 
+    // Archivo .rastro: guardar el proyecto con su video y volver a abrirlo como proyecto nuevo
+    await page.click('[data-tab="projects"]');
+    const before = await page.evaluate(
+      `(async () => { ${mods} const c = st.S.clips[0];
+        return { id: pj.P.project.id, n: st.S.clips.length, pts: c.track.pts.length, dur: c.dur, ovs: st.S.ovs.length } })()`
+    );
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-act="exportProj"]')]);
+    const rastro = path.join(__dirname, 'fixtures', 'smoke.rastro');
+    await dl.saveAs(rastro);
+    check(
+      dl.suggestedFilename().endsWith('.rastro') && fs.statSync(rastro).size > fs.statSync(FIX).size,
+      `guarda ${dl.suggestedFilename()} con el video`
+    );
+    await page.setInputFiles('#rastroIn', rastro);
+    check(
+      await until(
+        page,
+        async id => (await import('/js/project.js')).P.project.id !== id && !(await import('/js/project.js')).P.file,
+        before.id
+      ),
+      'abre el .rastro como proyecto nuevo'
+    );
+    const after = await page.evaluate(
+      `(async () => { ${mods} await new Promise(r => setTimeout(r, 500)); const c = st.S.clips[0];
+        return { n: st.S.clips.length, pts: c.track.pts.length, dur: c.dur, ovs: st.S.ovs.length, missing: c.missing,
+          ready: !!c.el && c.el.readyState >= 1, saved: (await pj.refreshList(), pj.P.list.length) } })()`
+    );
+    check(
+      after.n === before.n && after.pts === before.pts && after.ovs === before.ovs && !after.missing && after.ready,
+      'el proyecto importado conserva clips, rastreo, textos y video'
+    );
+    const bad = path.join(__dirname, 'fixtures', 'malo.rastro');
+    fs.writeFileSync(bad, 'esto no es un zip');
+    await page.setInputFiles('#rastroIn', bad);
+    check(
+      await until(
+        page,
+        () => /no es un proyecto/.test(document.querySelector('#toast')?.textContent || ''),
+        null,
+        5000
+      ),
+      'avisa si el archivo no es un .rastro'
+    );
+
     // Limpieza de videos guardados
     const gc = await page.evaluate(
       `(async () => { ${mods} const db = await import('/js/store.js');
         const id = st.S.clips[0].mediaId;
         await pj.saveNow();
         ac.act('del'); await pj.saveNow();
+        for (const p of await db.dbAll('projects')) if (p.id !== pj.P.project.id) await db.dbDel('projects', p.id); // el .rastro importado usa el mismo video
         const r = await db.dbGet('media', id); await db.dbPut('media', { ...r, at: 0 });
         const withHist = await pj.collectMedia();             // deshacer todavía lo necesita
         pj.resetHistory(); const after = await pj.collectMedia(); // ya nadie lo usa
@@ -162,6 +231,43 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
 
     check(!errs.length, 'sin errores en consola' + (errs.length ? ': ' + errs.join(' | ') : ''));
     await page.close();
+  }
+
+  // Otro equipo: navegador sin datos guardados abre el .rastro
+  console.log('\nOtro navegador (sin datos)');
+  {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    const errs = [];
+    page.on('pageerror', e => errs.push(e.message));
+    await page.goto(url);
+    await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+    await page.click('[data-tab="projects"]');
+    await page.setInputFiles('#rastroIn', path.join(__dirname, 'fixtures', 'smoke.rastro'));
+    const ok = await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        const c = S.clips[0];
+        return S.clips.length === 1 && c.kind === 'video' && !c.missing && c.el && c.el.readyState >= 2;
+      },
+      null,
+      15000
+    );
+    check(ok, 'abre el .rastro con su video');
+    await page.reload();
+    const kept = await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        return S.clips.length === 1 && S.clips[0].el && !S.clips[0].missing;
+      },
+      null,
+      15000
+    );
+    check(kept, 'tras recargar, el proyecto y el video siguen guardados');
+    check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
+    await ctx.close();
   }
 
   await browser.close();

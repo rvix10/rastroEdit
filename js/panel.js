@@ -233,7 +233,7 @@ const mb = b =>
 export function projectsPanel() {
   const cur = P.project;
   if (!P.ok)
-    return `<h2>Proyectos</h2><p class="stat warn">Este navegador no permite guardar datos (por ejemplo, en una ventana privada). Puedes editar y exportar, pero el proyecto se pierde al cerrar la página.</p>`;
+    return `<h2>Proyectos</h2><p class="stat warn">Este navegador no permite guardar datos (por ejemplo, en una ventana privada). Puedes editar y exportar, pero el proyecto se pierde al cerrar la página.</p>${fileBlock()}`;
   const st =
     {
       saved: 'Todos los cambios están guardados en este navegador.',
@@ -264,5 +264,18 @@ export function projectsPanel() {
     <div class="lbl">Guardados (${P.list.length})</div>
     ${P.list.length ? `<ul class="clist plist">${list}</ul>` : '<p class="empty">Cargando…</p>'}
     ${sto}
-    <p class="note">Los proyectos y sus videos se guardan solo en este navegador y este dispositivo. Para pasarlos a otro equipo, exporta el video final.</p>`;
+    <p class="note">Los proyectos y sus videos se guardan solo en este navegador y este dispositivo.</p>
+    ${fileBlock()}`;
+}
+// Archivo .rastro: el proyecto con sus videos, para abrirlo en otro equipo
+function fileBlock() {
+  const f = P.file;
+  return `<div class="lbl">Pasar a otro equipo</div>
+    ${
+      f
+        ? `<p class="note">${f.label} ${Math.round(f.p * 100)} %</p><div class="prog"><i style="width:${f.p * 100}%"></i></div>`
+        : `<div class="grid2"><button data-act="exportProj" ${P.project ? '' : 'disabled'}>Guardar .rastro</button>
+    <label class="btn file"><input type="file" id="rastroIn" accept=".rastro,application/zip" hidden>Abrir .rastro</label></div>`
+    }
+    <p class="note">El archivo .rastro incluye los videos. Ábrelo en otro equipo desde aquí y se agrega como proyecto nuevo.</p>`;
 }

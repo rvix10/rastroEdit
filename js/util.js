@@ -48,3 +48,30 @@ export function roundRect(g, x, y, w, h, r) {
 }
 export const getSel = () => S.clips.find(c => c.id === S.sel) || null;
 export const getOv = () => S.ovs.find(o => o.id === S.selOv) || null;
+
+/** Entrega un archivo al usuario (descarga del navegador o la de Claude si está disponible).
+ *  Devuelve un mensaje para mostrar. */
+export async function saveBlob(blob, filename) {
+  if (!S.dl) {
+    const url = URL.createObjectURL(blob),
+      a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return 'Descarga iniciada: ' + filename;
+  }
+  try {
+    await S.dl.save({ filename, data: blob });
+    return 'Archivo guardado.';
+  } catch (e) {
+    const c = e && e.code;
+    return c === 'declined'
+      ? 'Descarga cancelada.'
+      : c === 'rate_limited'
+        ? 'Hay otra descarga pendiente; intenta de nuevo en un momento.'
+        : 'No se pudo guardar el archivo' + (e && e.message ? ': ' + e.message : '.');
+  }
+}

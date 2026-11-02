@@ -1,11 +1,12 @@
 import { $, S, nid, setAspect } from './state.js';
-import { toast } from './util.js';
 import { DEMOS } from './demo.js';
 import { makeVid, wireAudio, once, seekTo, thumbFrom } from './clips.js';
 import { layout } from './timeline.js';
 import { pause } from './playback.js';
 import { renderPanel, renderTabs } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
+import { zip, unzip } from './archive.js';
+import { toast, saveBlob } from './util.js';
 import { openDB, dbGet, dbAll, dbPut, dbDel, getMeta, setMeta, isQuota, askPersist, estimate } from './store.js';
 
 /* ---------- proyectos: serializar, guardar, abrir, deshacer ---------- */
@@ -45,6 +46,7 @@ export const P = {
   saveTimer: null,
   saving: null,
   gcTimer: null,
+  file: null, // { label, p } mientras se arma o se abre un archivo .rastro
 };
 
 /* --- serialización --- */
@@ -305,6 +307,12 @@ export async function openProject(id) {
     return false;
   }
   if (P.project && P.project.id !== id) await saveNow();
+  await loadRecord(rec);
+  return true;
+}
+
+/** Reemplaza el proyecto abierto por el registro dado (de IndexedDB o de un archivo .rastro). */
+async function loadRecord(rec) {
   clearAll();
   await loadMediaFor(rec.data.clips || []);
   P.project = { id: rec.id, name: rec.name, createdAt: rec.createdAt };
@@ -314,8 +322,8 @@ export async function openProject(id) {
   S.T = Math.min(rec.data.T || 0, S.total);
   resetHistory();
   updProjHeader();
-  setStatus('saved');
-  setMeta('last', id).catch(() => {});
+  setStatus(P.ok ? 'saved' : 'off');
+  if (P.ok) setMeta('last', rec.id).catch(() => {});
   const miss = S.clips.filter(c => c.missing).length;
   if (miss)
     toast(
@@ -323,7 +331,6 @@ export async function openProject(id) {
         ? 'Falta 1 video: vuelve a vincularlo en Medios'
         : `Faltan ${miss} videos: vuelve a vincularlos en Medios`
     );
-  return true;
 }
 
 const newId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -414,6 +421,118 @@ export async function refreshList() {
   }
   P.storage = await estimate();
   if (S.tab === 'projects') renderPanel();
+}
+
+/* --- archivo .rastro: el proyecto con sus videos, para moverlo entre equipos ---
+   Es un zip con project.json y media/<id>.<ext>. */
+const RASTRO_V = 1;
+const extOf = (name, type) => {
+  const m = /\.([a-z0-9]{2,5})$/i.exec(name || '');
+  return m ? m[1].toLowerCase() : /mp4/.test(type) ? 'mp4' : /quicktime/.test(type) ? 'mov' : 'webm';
+};
+// Sin tildes ni caracteres raros: algunos navegadores ignoran el nombre si no es ASCII
+const safeName = s =>
+  (s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w .()-]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim() || 'proyecto';
+function setFile(label, p) {
+  P.file = label ? { label, p } : null;
+  if (S.tab === 'projects') renderPanel();
+}
+
+export async function exportProjectFile() {
+  if (!P.project || P.file || !canEdit()) return;
+  if (P.ok) await saveNow();
+  setFile('Preparando archivo…', 0);
+  try {
+    const media = [],
+      entries = [],
+      seen = new Set();
+    let missing = 0;
+    for (const c of S.clips) {
+      if (c.kind !== 'video' || !c.mediaId || seen.has(c.mediaId)) continue;
+      seen.add(c.mediaId);
+      const md = P.media.get(c.mediaId);
+      if (!md || !md.blob) {
+        missing++;
+        continue;
+      }
+      const rec = P.ok ? await dbGet('media', c.mediaId).catch(() => null) : null;
+      const name = (rec && rec.name) || c.name,
+        type = md.blob.type || (rec && rec.type) || '';
+      const file = `media/${c.mediaId}.${extOf(name, type)}`;
+      media.push({ id: c.mediaId, name, type, file });
+      entries.push({ name: file, data: md.blob });
+    }
+    const doc = {
+      format: 'rastro',
+      v: RASTRO_V,
+      exportedAt: Date.now(),
+      name: P.project.name,
+      createdAt: P.project.createdAt,
+      data: { ...content(), sel: S.sel, T: S.T, pps: S.pps },
+      media,
+    };
+    entries.unshift({ name: 'project.json', data: JSON.stringify(doc) });
+    const blob = await zip(entries, p => setFile('Preparando archivo…', p));
+    setFile(null);
+    const msg = await saveBlob(blob, safeName(P.project.name) + '.rastro');
+    toast(missing ? `${msg} Sin ${missing === 1 ? '1 video que falta' : missing + ' videos que faltan'}.` : msg);
+  } catch (e) {
+    setFile(null);
+    toast(
+      e && e.message === 'too-big'
+        ? 'El proyecto pesa más de 4 GB: es demasiado grande para un archivo .rastro'
+        : 'No se pudo preparar el archivo del proyecto'
+    );
+  }
+}
+
+export async function importProjectFile(file) {
+  if (!file || P.file) return;
+  setFile('Abriendo archivo…', 0);
+  // En un equipo nuevo, el proyecto de ejemplo se rastrea al arrancar: se espera en vez de rechazar
+  while (S.tracking) await new Promise(r => setTimeout(r, 150));
+  if (!canEdit()) return setFile(null);
+  let doc, entries;
+  try {
+    entries = await unzip(file);
+    doc = JSON.parse(await entries.get('project.json').text());
+    if (doc.format !== 'rastro' || !doc.data || !Array.isArray(doc.data.clips)) throw new Error('not-rastro');
+  } catch (e) {
+    setFile(null);
+    toast(
+      e && e.message === 'unsupported'
+        ? 'Este archivo usa un formato de zip que el editor no puede leer'
+        : 'Este archivo no es un proyecto .rastro'
+    );
+    return;
+  }
+  if (doc.v > RASTRO_V) toast('El archivo es de una versión más nueva del editor; puede que algo no se vea igual');
+  if (P.project && P.ok) await saveNow();
+  const list = doc.media || [];
+  let i = 0;
+  for (const m of list) {
+    const b = m && m.id && entries.get(m.file);
+    if (b) await storeMedia(m.id, new Blob([b], { type: m.type || b.type }), m.name || m.id);
+    setFile('Abriendo archivo…', ++i / list.length);
+  }
+  // Siempre como proyecto nuevo: abrir el mismo archivo dos veces no pisa nada
+  const taken = new Set(P.list.map(p => p.name));
+  let name = doc.name || 'Proyecto importado';
+  if (taken.has(name)) name += ' (importado)';
+  const rec = { id: newId(), name, createdAt: doc.createdAt || Date.now(), data: doc.data };
+  await loadRecord(rec);
+  setFile(null);
+  if (P.ok) await saveNow();
+  S.tab = 'projects';
+  renderTabs();
+  refreshList();
+  renderPanel();
+  toast('Proyecto abierto: ' + name);
 }
 
 /* --- volver a vincular un video faltante --- */
