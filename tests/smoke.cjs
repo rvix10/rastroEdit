@@ -1,6 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
 //   node tests/smoke.cjs                 todo
-//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, 2puntos, rotacion, demux)
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, 2puntos, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -1100,6 +1100,89 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     check(kept, 'la resolución y la calidad elegidas se recuerdan');
     check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
     await page.close();
+  }
+
+  // Rastreo rápido: cuadros con VideoDecoder y cálculo en un Web Worker (la interfaz no se traba)
+  if (run('rastreo')) {
+    console.log('\nRastreo rápido (VideoDecoder + Web Worker)');
+    const trackRun = async noWorker => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+      const errs = [];
+      page.on('pageerror', e => errs.push(e.message));
+      if (noWorker) await page.addInitScript(() => (window.Worker = undefined));
+      await page.goto(url);
+      await until(page, async () => {
+        const { S } = await import('/js/state.js');
+        return S.clips.length === 3 && !S.tracking;
+      });
+      await page.click('[data-tab="media"]');
+      await page.setInputFiles('#fileIn', FIX);
+      await until(page, async () => (await import('/js/state.js')).S.clips.some(c => c.kind === 'video'), null, 20000);
+      const seed = truth(1);
+      const r = await page.evaluate(
+        `(async () => { ${mods} const tr = await import('/js/tracker.js');
+          ac.act('clearDemo'); const c = st.S.clips[0];
+          c.track = { seed: { t: 1, x: ${seed.x / 1280}, y: ${seed.y / 720} }, pts: [] };
+          const long = []; const po = new PerformanceObserver(l => { for (const e of l.getEntries()) long.push(e.duration) });
+          po.observe({ type: 'longtask' });
+          const t0 = performance.now(); await tr.runTrack(c, true); const took = (performance.now() - t0) / 1000;
+          await new Promise(r => setTimeout(r, 50)); po.disconnect();
+          const at = t => c.track.pts.reduce((a, p) => Math.abs(p.t - t) < Math.abs(a.t - t) ? p : a);
+          const err = [0.3, 2, 3].map(t => { const p = at(t), tx = 110 + 240 * p.t, ty = 330 + 120 * Math.sin(2 * p.t); return Math.hypot(p.x * 1280 - tx, p.y * 720 - ty) });
+          return { took, err, long: Math.max(0, ...long), pts: c.track.pts.map(p => [p.t.toFixed(3), p.x.toFixed(5), p.y.toFixed(5)].join()) } })()`
+      );
+      await page.close();
+      return { ...r, errs };
+    };
+    const w = await trackRun(false);
+    // Antes (seek en el <video> por cuadro, con este video de un solo keyframe): ~16 s
+    check(w.took < 6, `4 s de video se rastrean en ${w.took.toFixed(1)} s (antes ~16 s)`);
+    check(w.long < 100, `la interfaz no se traba mientras rastrea (tarea más larga: ${Math.round(w.long)} ms)`);
+    check(
+      Math.max(...w.err) < 5,
+      `preciso antes y después de la semilla (error ${w.err.map(e => e.toFixed(1)).join(' / ')} px en 0,3 / 2 / 3 s)`
+    );
+    const nw = await trackRun(true);
+    check(
+      nw.pts.join('|') === w.pts.join('|'),
+      'sin Web Workers da exactamente el mismo resultado (calcula en el hilo principal)'
+    );
+    // Al abrir la app se rastrea el ejemplo: si en ese momento se pide otro rastreo, el automático cede el paso
+    {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+      await page.goto(url);
+      await until(
+        page,
+        async () => {
+          const { S } = await import('/js/state.js');
+          return S.clips.length === 3 && !!S.tracking;
+        },
+        null,
+        10000
+      );
+      const r = await page.evaluate(
+        `(async () => { ${mods} const tr = await import('/js/tracker.js');
+          const busy = !!st.S.tracking, c = st.S.clips[2];
+          c.track = { seed: { t: 1, x: 0.5, y: 0.5 }, pts: [] };
+          await tr.runTrack(c); // como al tocar Rastrear
+          // Los selectores de archivo no se reemplazan al redibujar el panel
+          const inp = document.querySelector('#fileIn'); (await import('/js/panel.js')).renderPanel();
+          return { busy, n: c.track.pts.length, sameInput: inp === document.querySelector('#fileIn'), inPanel: document.querySelectorAll('#panel input[type=file]').length } })()`
+      );
+      check(
+        r.busy && r.n > 10,
+        `si el rastreo del ejemplo sigue en curso, tocar Rastrear lo detiene y rastrea lo pedido (${r.n} muestras)`
+      );
+      check(
+        r.sameInput && !r.inPanel,
+        'los selectores de archivo están fuera del panel (no se pierde el archivo si el panel se redibuja)'
+      );
+      await page.close();
+    }
+    check(
+      !w.errs.length && !nw.errs.length,
+      'sin errores' + (w.errs.length || nw.errs.length ? ': ' + [...w.errs, ...nw.errs].join(' | ') : '')
+    );
   }
 
   const extra = ensureExtra();

@@ -9,7 +9,7 @@ import { startExport, cancelExport, saveResult, setExportOpt } from './export.js
 import { renderTabs, setTab, renderPanel } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
 import { zoomAt } from './timeline-touch.js';
-import { importMusic, attachMusic } from './music.js';
+import { importMusic, attachMusic, MUSIC_ACCEPT } from './music.js';
 import {
   P,
   commit,
@@ -158,6 +158,7 @@ export function act(a, el) {
       renderPanel();
       break;
     case 'clearDemo': {
+      if (S.clips.some(x => x.kind === 'demo' && x.id === S.tracking)) S.trackCancel = true; // deja de rastrear lo que se quita
       const ids = S.clips.filter(x => x.kind === 'demo').map(x => x.id);
       S.clips = S.clips.filter(x => x.kind !== 'demo');
       S.ovs = S.ovs.filter(x => !ids.includes(x.clipId));
@@ -203,6 +204,7 @@ export function act(a, el) {
       renderPanel();
       break;
     case 'del': {
+      if (c && c.id === S.tracking) S.trackCancel = true;
       const i = S.clips.indexOf(c);
       if (c.el) {
         c.el.pause();
@@ -415,7 +417,9 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   if (b && !b.disabled) act(b.dataset.act, b);
 });
-panel.addEventListener('change', e => {
+/* selectores de archivo (fijos, fuera del panel: ver index.html) */
+$('#musicIn').accept = MUSIC_ACCEPT;
+$('#pickers').addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'fileIn') {
     importFiles(t.files);
@@ -438,10 +442,6 @@ panel.addEventListener('change', e => {
     }
     return;
   }
-  if (t.dataset.k === 'mloop' && S.music) {
-    S.music.loop = t.checked;
-    renderTimeline();
-  }
   if (t.id === 'rastroIn') {
     const f = t.files[0];
     if (f) importProjectFile(f);
@@ -453,6 +453,13 @@ panel.addEventListener('change', e => {
     if (f) relink(t.dataset.clip, f);
     t.value = '';
     return;
+  }
+});
+panel.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.k === 'mloop' && S.music) {
+    S.music.loop = t.checked;
+    renderTimeline();
   }
   if (t.dataset.k === 'pname') {
     renameProject(t.value);

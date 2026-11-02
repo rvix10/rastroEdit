@@ -13,9 +13,9 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Verificar sintaxis: `for f in js/*.js; do node --check --input-type=module < $f; done`
 - Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
 - Prueba de humo: `node tests/smoke.cjs` (o solo algunas secciones: `node tests/smoke.cjs tactil 2puntos`;
-  secciones: basico, tablet, tactil, audio, export, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
+  secciones: basico, tablet, tactil, audio, export, rastreo, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
   del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
-  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
+  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo rápido (tiempo, sin trabas, mismo resultado sin Worker), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
@@ -46,7 +46,9 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `transitions.js` | `TR` (transiciones) y `applyFilter` |
 | `render.js` | `renderFrame(T)`: compone clips, transición, overlays y guías; `trackAt`, `trackXform`, `ovPos`/`ovSetAbs` |
 | `playback.js` | Bucle `requestAnimationFrame`; al reproducir, el reloj del proyecto sigue al `<video>` activo (`videoClock`) |
-| `tracker.js` | Rastreo 2D de 1 o 2 puntos (ZNCC, desenfoque, plantilla adaptativa, subpíxel; con 2 puntos, plantilla original deformada con el giro/escala previstos) |
+| `tracker.js` | Coordina el rastreo: cuadros de análisis con `FrameSource` (hacia atrás, por tramos de 2 s decodificados en orden), pasadas adelante/atrás, suavizado y resultado |
+| `trackcore.js` | Cálculo del rastreo sin DOM (`TrackCore`): ZNCC, desenfoque, plantilla adaptativa, subpíxel; con 2 puntos, plantilla original deformada con el giro/escala previstos |
+| `track-worker.js` | Web Worker que corre `TrackCore` (si no hay Workers de módulo, `tracker.js` lo usa en el hilo principal) |
 | `export.js` | Elige cómo exportar: rápida (`fastexport.js`) o, si no hay WebCodecs o falla, `MediaRecorder` en tiempo real (`S.fastBroken`) |
 | `fastexport.js` | Exportación con WebCodecs: cuadro por cuadro (`renderFrame` + `VideoEncoder`) a 720p/1080p/4K (`exportSize`, `QUALITIES`), audio mezclado con `OfflineAudioContext` + `AudioEncoder`; escribe en disco (OPFS) |
 | `frames.js` | `FrameSource`: cuadro exacto de un video con `VideoDecoder` (decodifica en orden); `drawRotated()` |
@@ -95,6 +97,11 @@ python3 -m http.server 8080   # abrir http://localhost:8080
   (sin arrastre) se resuelven al soltar llamando `act()` con el `data-act` del elemento tocado; los clicks que genera el
   puntero dentro de la línea de tiempo se descartan (con `setPointerCapture` pueden llegar al contenedor), los de teclado no.
   Reordenar y recortar se aplican al soltar, con un solo `commit()`.
+- Selectores de archivo (`#fileIn`, `#relinkIn`, `#rastroIn`, `#musicIn`): están fijos en `#pickers` (index.html), fuera
+  del panel, y el panel los abre con `<label for>`. No pongas `<input type="file">` dentro del panel: se redibuja (al
+  autoguardar, al terminar un rastreo…) y el archivo elegido se perdería si el diálogo estaba abierto.
+- Rastreo: solo uno a la vez (`S.tracking`). El automático del ejemplo es silencioso (`S.trackSilent`) y cede el paso si
+  la persona pide otro; quitar el clip que se rastrea pone `S.trackCancel`. El resultado debe ser idéntico con o sin Worker.
 - UI con `data-act="accion:arg"`, `data-tab`, `data-k` (inputs). No usar `alert/confirm/prompt`: confirmaciones dentro de la página.
 - Textos de la interfaz en español, directos, desde el lado del usuario. Toast tras acciones ("Clip dividido", "Proyecto eliminado").
 - Colores siempre desde los tokens de `:root` en `css/styles.css`. Debe funcionar a 390 px de ancho sin scroll horizontal.
@@ -108,5 +115,3 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 ## Pendiente (en orden propuesto)
 
 1. Tracking planar de 4 esquinas (homografía) para reemplazar pantallas/letreros en perspectiva.
-2. Rastreo más rápido: leer los cuadros con `FrameSource` (frames.js) en vez de seek en `<video>` (hoy cada seek decodifica
-   desde el keyframe anterior; con GOP largo, 4 s de video tardan ~20 s en analizarse).

@@ -57,6 +57,13 @@
     </div>
   </section>
 </div>
+<!-- Selectores de archivo fijos: el panel se redibuja y no debe perder el archivo elegido mientras el diálogo está abierto -->
+<div id="pickers" hidden>
+  <input type="file" id="fileIn" accept="video/*" multiple>
+  <input type="file" id="relinkIn" accept="video/*">
+  <input type="file" id="rastroIn" accept=".rastro,application/zip">
+  <input type="file" id="musicIn">
+</div>
 <div id="vids"></div>
 <div class="toast" id="toast" hidden></div>
 <script type="module" src="js/main.js"></script>

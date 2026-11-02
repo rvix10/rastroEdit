@@ -5,7 +5,6 @@ import { exportInfo, cancelExport } from './export.js';
 import { RESOLUTIONS, QUALITIES } from './fastexport.js';
 import { act } from './actions.js';
 import { P, refreshList } from './project.js';
-import { MUSIC_ACCEPT } from './music.js';
 
 /* ---------- UI: pestañas ---------- */
 export const TABS = [
@@ -64,14 +63,13 @@ export function renderPanel() {
   let h = '';
   if (S.tab === 'media') {
     h = `<h2>Medios</h2>
-    <label class="btn primary file"><input type="file" id="fileIn" accept="video/*" multiple hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Importar videos</label>
+    <label class="btn primary file" for="fileIn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Importar videos</label>
     <p class="note">Tus videos se procesan en este dispositivo; no se suben a ningún servidor.</p>
     <div class="lbl">Formato del proyecto</div>
     <div class="seg">${['16:9', '9:16', '1:1'].map(a => `<button data-act="aspect:${a}" aria-pressed="${S.aspect === a}">${a}</button>`).join('')}</div>
     <div class="lbl">Clips (${S.clips.length})</div>
     ${S.clips.length ? `<ul class="clist">${S.clips.map(k => `<li data-act="selclip:${k.id}" class="${k.id === S.sel ? 'sel' : ''}"><img src="${k.thumb}" alt=""><div><b>${esc(k.name)}</b><span>${fmtS(k.out - k.in)} · ${k.sw}×${k.sh}</span></div>${k.kind === 'demo' ? '<span class="tag">Ejemplo</span>' : k.missing ? `<button class="tag miss" data-act="relink:${k.id}">Vincular</button>` : ''}</li>`).join('')}</ul>` : '<p class="empty">Aún no hay clips. Importa tus videos para empezar.</p>'}
     ${S.clips.some(k => k.missing) ? '<p class="stat warn">Algunos videos no están guardados en este navegador. Toca <b>Vincular</b> y elige el mismo archivo para recuperarlos.</p>' : ''}
-    <input type="file" id="relinkIn" accept="video/*" hidden>
     ${S.clips.some(k => k.kind === 'demo') ? '<button data-act="clearDemo">Quitar clips de ejemplo</button>' : ''}
     ${musicPanel()}`;
   } else if (S.tab === 'projects') h = projectsPanel();
@@ -297,7 +295,7 @@ const mb = b =>
 function musicPanel() {
   const m = S.music;
   const pick = (label, cls) =>
-    `<label class="btn file${cls ? ' ' + cls : ''}"><input type="file" id="musicIn" accept="${MUSIC_ACCEPT}" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>${label}</label>`;
+    `<label class="btn file${cls ? ' ' + cls : ''}" for="musicIn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>${label}</label>`;
   if (!m)
     return `<div class="lbl">Música de fondo</div>${pick('Agregar música', '')}
     <p class="note">Suena durante todo el proyecto, debajo del audio de los clips. MP3, M4A, WAV u OGG.</p>`;
@@ -357,7 +355,7 @@ function fileBlock() {
       f
         ? `<p class="note">${f.label} ${Math.round(f.p * 100)} %</p><div class="prog"><i style="width:${f.p * 100}%"></i></div>`
         : `<div class="grid2"><button data-act="exportProj" ${P.project ? '' : 'disabled'}>Guardar .rastro</button>
-    <label class="btn file"><input type="file" id="rastroIn" accept=".rastro,application/zip" hidden>Abrir .rastro</label></div>`
+    <label class="btn file" for="rastroIn">Abrir .rastro</label></div>`
     }
     <p class="note">El archivo .rastro incluye los videos. Ábrelo en otro equipo desde aquí y se agrega como proyecto nuevo.</p>`;
 }

@@ -54,7 +54,9 @@ js/
   transitions.js  transiciones y filtros de color
   render.js       composición de cada cuadro, overlays y guías
   playback.js     reproducción, sincronía de video/audio, bucle principal
-  tracker.js      rastreo de movimiento
+  tracker.js      rastreo de movimiento: coordinación
+  trackcore.js    rastreo: cálculo (ZNCC), sin DOM
+  track-worker.js rastreo: Web Worker
   export.js       exportación: elige la rápida o MediaRecorder
   fastexport.js   exportación con WebCodecs (cuadro por cuadro + audio fuera de línea)
   frames.js       cuadros exactos de un video con VideoDecoder
@@ -80,15 +82,19 @@ rastrea un objeto de trayectoria conocida, exporta y revisa que no haya errores 
 
 ## Rastreo: cómo funciona
 
-`js/tracker.js` hace *template matching* con correlación cruzada normalizada (ZNCC):
+`js/trackcore.js` hace *template matching* con correlación cruzada normalizada (ZNCC), dentro de un Web Worker
+(`js/track-worker.js`) para que la interfaz no se trabe:
 
-1. Cada cuadro se reduce a 400 px de ancho, se pasa a gris y se desenfoca, para tolerar rotación y compresión.
-2. Busca un parche de 21×21 en una ventana de ±24 px alrededor de la posición predicha (posición + velocidad), comparando contra la plantilla original y una adaptativa.
-3. Refina con ajuste subpíxel (parábola).
-4. Si el objeto se tapa unos cuadros, predice con la velocidad hasta 4 cuadros. Si sale de cuadro o no se recupera con confianza, marca el tramo como perdido.
-5. Con **2 puntos**, ambos se buscan sobre los mismos cuadros. El ángulo y la distancia entre ellos, comparados con el cuadro donde se marcaron, dan el giro y la escala. Ese giro y escala previstos se usan para deformar la plantilla original de cada punto antes de compararla: sin esto, al girar el objeto la plantilla deja de parecerse y el rastreo se desvía (en la prueba, de 29 px a 7 px de error tras 2,8 s y 80° de giro).
+1. Los cuadros se leen con `VideoDecoder` (`js/frames.js`), en orden: no se hace un seek por cuadro. Hacia atrás desde
+   la semilla se decodifican tramos de 2 s en orden y se entregan al revés. Sin WebCodecs, se usa seek en el `<video>`.
+2. Cada cuadro se reduce a 400 px de ancho, se pasa a gris y se desenfoca, para tolerar rotación y compresión.
+3. Busca un parche de 21×21 en una ventana de ±24 px alrededor de la posición predicha (posición + velocidad), comparando contra la plantilla original y una adaptativa.
+4. Refina con ajuste subpíxel (parábola).
+5. Si el objeto se tapa unos cuadros, predice con la velocidad hasta 4 cuadros. Si sale de cuadro o no se recupera con confianza, marca el tramo como perdido.
+6. Con **2 puntos**, ambos se buscan sobre los mismos cuadros. El ángulo y la distancia entre ellos, comparados con el cuadro donde se marcaron, dan el giro y la escala. Ese giro y escala previstos se usan para deformar la plantilla original de cada punto antes de compararla.
 
-Precisión medida en pruebas: error promedio de ~2 px en el clip de ejemplo y de ~6 px en un video real de 1280×720 (objeto con textura sobre fondo cambiante).
+En la prueba (video de 4 s, 1280×720): ~1,7 s para 1 punto y ~3 s para 2 puntos (antes, con un seek por cuadro,
+16–19 s), sin trabar la interfaz, con 1–2,5 px de error en 1 punto y menos de 1° de error de giro en 2 puntos.
 
 ## Limitaciones conocidas
 
