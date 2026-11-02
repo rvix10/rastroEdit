@@ -13,6 +13,7 @@ import './transitions.js';
 import './render.js';
 import './export.js';
 import './actions.js';
+import './pwa.js';
 import './timeline-touch.js';
 
 /* ---------- arranque ---------- */

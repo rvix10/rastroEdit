@@ -13,9 +13,9 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Verificar sintaxis: `for f in js/*.js; do node --check --input-type=module < $f; done`
 - Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
 - Prueba de humo: `node tests/smoke.cjs` (o solo algunas secciones: `node tests/smoke.cjs tactil 2puntos`;
-  secciones: basico, tablet, tactil, audio, export, rastreo, acceso, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
+  secciones: basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
   del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
-  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo rápido (tiempo, sin trabas, mismo resultado sin Worker), accesibilidad y primer uso (contraste, nombres, teclado, avisos, bienvenida), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
+  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo rápido (tiempo, sin trabas, mismo resultado sin Worker), accesibilidad y primer uso (contraste, nombres, teclado, avisos, bienvenida), app instalable (manifiesto, sin conexión, diagnóstico), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
@@ -61,6 +61,10 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `store.js` | IndexedDB: `projects`, `media` (blobs de video), `meta` |
 | `project.js` | Serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer (`P`), `collectMedia()`, archivo `.rastro` |
 | `archive.js` | Zip mínimo sin dependencias (`zip`/`unzip`): escribe sin comprimir, lee por rebanadas, sin ZIP64 (máx. 4 GB) |
+| `pwa.js` | App instalable: registra `sw.js`, guarda el aviso de instalación (`S.pwa`), `promptInstall()`, `isStandalone()` |
+| `diag.js` | Diagnóstico (Proyectos → Este dispositivo): hardware, códecs por hardware/software, medición en «× tiempo real», informe |
+
+Fuera de `js/`: `sw.js` (service worker: la app funciona sin conexión), `manifest.webmanifest` e `icons/`.
 
 ## Convenciones
 
@@ -110,6 +114,9 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Atajos: Espacio, ←/→ (un cuadro; Shift: 1 s), Inicio/Fin, S dividir, Supr eliminar clip, Ctrl+Z/Y, Ctrl+S.
 - Primer uso: la bienvenida (`welcomeCard` en panel.js) se ve mientras el proyecto tiene clips de ejemplo, hasta que se
   cierra (`localStorage` `rastro.welcome`). Un proyecto sin clips muestra en la vista previa qué hacer.
+- Sin conexión (`sw.js`): precarga la lista `APP` y responde primero desde la red (si no hay o tarda más de 3 s, desde la
+  copia). **Si agregas un archivo a `js/`, `css/` o `icons/`, súmalo a `APP`** (la sección `pwa` de la prueba lo revisa).
+  Sube `CACHE` solo si cambia la forma de guardar; con red primero, una versión nueva nunca queda vieja.
 - UI con `data-act="accion:arg"`, `data-tab`, `data-k` (inputs). No usar `alert/confirm/prompt`: confirmaciones dentro de la página.
 - Textos de la interfaz en español, directos, desde el lado del usuario. Toast tras acciones ("Clip dividido", "Proyecto eliminado").
 - Colores siempre desde los tokens de `:root` en `css/styles.css`. Debe funcionar a 390 px de ancho sin scroll horizontal.
