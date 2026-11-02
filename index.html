@@ -14,9 +14,16 @@
 <body>
 <div class="app">
   <header class="head">
-    <div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>Rastro</div>
-    <div class="proj">Proyecto · Domingo de fútbol</div>
+    <div class="logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg><span class="word">Rastro</span></div>
+    <button class="proj" id="projBtn" data-tab="projects" aria-label="Proyectos">
+      <span class="save" id="saveState" data-s="saved" title="Guardado" aria-hidden="true"></span>
+      <span class="pname" id="projName">Cargando…</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <span class="savetext" id="saveText" aria-live="polite">Guardado</span>
     <div class="sp"></div>
+    <button class="hbtn" id="bUndo" data-act="undo" title="Deshacer (Ctrl+Z)" aria-label="Deshacer" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+    <button class="hbtn" id="bRedo" data-act="redo" title="Rehacer (Ctrl+Shift+Z)" aria-label="Rehacer" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
     <div class="chip-time" id="hdrDur">00:00.00</div>
   </header>
 

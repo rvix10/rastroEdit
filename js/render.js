@@ -9,7 +9,13 @@ import { act } from './actions.js';
 export function sourceOf(c,local){if(c.kind==='demo'){if(c._lastT!==local){c.draw(c.sg,local,c.sw,c.sh);c._lastT=local}return c.scv}
   return c.el&&c.el.readyState>=2?c.el:null}
 export function drawClipLayer(c,local,L){const g=L.getContext('2d');g.globalAlpha=1;g.globalCompositeOperation='source-over';g.fillStyle='#000';g.fillRect(0,0,S.W,S.H);
-  const src=sourceOf(c,local);if(src){const m=coverOf(c);g.drawImage(src,m.dx,m.dy,m.dw,m.dh)}applyFilter(g,c.filter,S.W,S.H)}
+  const src=sourceOf(c,local);if(src){const m=coverOf(c);g.drawImage(src,m.dx,m.dy,m.dw,m.dh)}
+  else if(c.missing){drawMissing(g,c);return}
+  applyFilter(g,c.filter,S.W,S.H)}
+// Video que no está guardado en este navegador: aviso en el cuadro en vez de negro
+export function drawMissing(g,c){const s=Math.min(S.W,S.H);g.fillStyle='#181b22';g.fillRect(0,0,S.W,S.H);g.textAlign='center';g.textBaseline='middle';
+  g.fillStyle='#ef6b5c';g.font=`700 ${s*.045}px Manrope, system-ui, sans-serif`;g.fillText('Falta el video',S.W/2,S.H/2-s*.04);
+  g.fillStyle='#8c93a3';g.font=`600 ${s*.03}px Manrope, system-ui, sans-serif`;g.fillText('«'+c.name+'» · vuelve a vincularlo en Medios',S.W/2,S.H/2+s*.03)}
 export function trackAt(c,local){const P=c.track&&c.track.pts;if(!P||!P.length)return null;if(local<=P[0].t)return P[0];if(local>=P[P.length-1].t)return P[P.length-1];
   let lo=0,hi=P.length-1;while(hi-lo>1){const m=(lo+hi)>>1;if(P[m].t<=local)lo=m;else hi=m}const a=P[lo],b=P[hi],k=(local-a.t)/((b.t-a.t)||1);return{x:a.x+(b.x-a.x)*k,y:a.y+(b.y-a.y)*k}}
 export function ovPos(o,c,local){if(o.follow){const tp=trackAt(c,local);if(tp){const m=mapSrc(c,tp.x,tp.y);return{x:m.x+o.x*S.W,y:m.y+o.y*S.H}}}return{x:o.x*S.W,y:o.y*S.H}}

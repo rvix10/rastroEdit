@@ -56,3 +56,6 @@ export function drawLake(g,t,w,h){
   g.fillStyle='#132232';for(let i=0;i<14;i++){const x=20+i*11,hh=60+hash(i+3)*70,sway=Math.sin(t*1.5+i)*4;g.beginPath();g.moveTo(x,h);g.quadraticCurveTo(x+sway,h-hh*.6,x+sway*1.6,h-hh);g.lineTo(x+3,h);g.fill()}
   g.restore();
 }
+
+// Clips de ejemplo disponibles (clave → nombre, duración y función de dibujo)
+export const DEMOS={cancha:{name:'Cancha',dur:5,fn:drawField},avenida:{name:'Avenida',dur:4,fn:drawStreet},lago:{name:'Lago',dur:4.5,fn:drawLake}};

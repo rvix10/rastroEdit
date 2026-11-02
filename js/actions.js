@@ -1,4 +1,4 @@
-import { $, cv, panel, tlInner, tlScroll, S, nid, sizeLayers } from './state.js';
+import { $, cv, panel, tlInner, tlScroll, S, nid, setAspect } from './state.js';
 import { fmtS, toast, getSel, getOv } from './util.js';
 import { coverOf, mapSrc, importFiles, cloneClip } from './clips.js';
 import { layout, activeAt, localOf } from './timeline.js';
@@ -8,6 +8,7 @@ import { runTrack } from './tracker.js';
 import { startExport, cancelExport, saveResult } from './export.js';
 import { renderTabs, setTab, renderPanel } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
+import { P, commit, undo, redo, newProject, duplicateProject, openProject, deleteProject, renameProject, relink, refreshList } from './project.js';
 
 /* ---------- acciones ---------- */
 export function selClip(id){S.sel=id;S.selOv=null;S.pick=false;renderTimeline();renderPanel()}
@@ -32,7 +33,7 @@ export function act(a,el){
     case 'selclip':selClip(arg);break;
     case 'seltrans':S.sel=arg;S.selOv=null;S.tab='trans';renderTabs();renderTimeline();renderPanel();break;
     case 'selov':{const ov=S.ovs.find(x=>x.id===arg);if(!ov)break;S.sel=ov.clipId;S.selOv=arg;const cc=getSel();if(cc&&!activeAt(S.T).includes(cc))seek(cc._start+Math.max(ov.t0,cc.in)-cc.in+.05);if(S.tab!=='text'){S.tab='text';renderTabs()}renderTimeline();renderPanel();break}
-    case 'aspect':{S.aspect=arg;const d={'16:9':[1280,720],'9:16':[720,1280],'1:1':[1080,1080]}[arg];S.W=d[0];S.H=d[1];sizeLayers();renderPanel();break}
+    case 'aspect':setAspect(arg);renderPanel();break;
     case 'clearDemo':{const ids=S.clips.filter(x=>x.kind==='demo').map(x=>x.id);S.clips=S.clips.filter(x=>x.kind!=='demo');S.ovs=S.ovs.filter(x=>!ids.includes(x.clipId));
       if(S.clips[0])S.clips[0].trans={type:'none',d:.5};S.sel=S.clips[0]?S.clips[0].id:null;S.selOv=null;S.T=0;renderTimeline();renderPanel();break}
     case 'filter':c.filter=arg;renderPanel();break;
@@ -65,15 +66,31 @@ export function act(a,el){
     case 'export':startExport();break;
     case 'cancelExport':cancelExport();break;
     case 'save':saveResult();break;
-  }}
+    case 'undo':undo();break;
+    case 'redo':redo();break;
+    case 'newProject':newProject();break;
+    case 'dupProject':duplicateProject();break;
+    case 'openProj':openProject(arg).then(ok=>{if(ok){refreshList();toast('Proyecto abierto')}});break;
+    case 'delProj':
+      if(P.confirmDel===arg){P.confirmDel=null;deleteProject(arg)}
+      else{P.confirmDel=arg;renderPanel();clearTimeout(P.confirmT);P.confirmT=setTimeout(()=>{P.confirmDel=null;if(S.tab==='projects')renderPanel()},4000)}
+      break;
+    case 'relink':{const inp=$('#relinkIn');if(inp){inp.dataset.clip=arg;inp.click()}break}
+  }
+  commit();
+}
 
 document.addEventListener('click',e=>{const t=e.target.closest('[data-tab]');if(t){setTab(t.dataset.tab);return}
   const b=e.target.closest('[data-act]');if(b&&!b.disabled)act(b.dataset.act,b)});
 panel.addEventListener('change',e=>{const t=e.target;
   if(t.id==='fileIn'){importFiles(t.files);t.value='';return}
+  if(t.id==='relinkIn'){const f=t.files[0];if(f)relink(t.dataset.clip,f);t.value='';return}
+  if(t.dataset.k==='pname'){renameProject(t.value);return}
   if(t.dataset.k==='path'){S.showPath=t.checked}
-  if(t.dataset.k==='follow'){const o=getOv();if(o)toggleFollow(o,t.checked);renderTimeline()}});
+  if(t.dataset.k==='follow'){const o=getOv();if(o)toggleFollow(o,t.checked);renderTimeline()}
+  commit()});
 panel.addEventListener('input',e=>{const t=e.target,k=t.dataset.k;if(!k)return;const c=getSel(),o=getOv(),v=t.value;
+  if(k==='pname'){renameProject(v);return}
   if(k==='in'){c.in=Math.min(+v,c.out-.2);t.value=c.in;$('#o-in').textContent=fmtS(c.in);renderTimeline();seek(c._start)}
   else if(k==='out'){c.out=Math.max(+v,c.in+.2);t.value=c.out;$('#o-out').textContent=fmtS(c.out);renderTimeline();seek(c._start+c._len-.04)}
   else if(k==='tdur'){c.trans.d=+v;$('#o-tdur').textContent=fmtS(c.trans.d);renderTimeline()}
@@ -83,9 +100,16 @@ panel.addEventListener('input',e=>{const t=e.target,k=t.dataset.k;if(!k)return;c
 /* transporte y zoom */
 $('#bPlay').addEventListener('click',()=>{if(S.exporting)return;S.playing?pause():play()});
 $('#bStart').addEventListener('click',()=>{if(S.exporting)return;pause();seek(0);tlScroll.scrollLeft=0});
-$('#bSplit').addEventListener('click',()=>{if(!S.exporting)doSplit()});
+$('#bSplit').addEventListener('click',()=>{if(!S.exporting){doSplit();commit()}});
 $('#zIn').addEventListener('click',()=>{S.pps=Math.min(220,S.pps*1.35);renderTimeline()});
 $('#zOut').addEventListener('click',()=>{S.pps=Math.max(18,S.pps/1.35);renderTimeline()});
+document.addEventListener('keydown',e=>{
+  const typing=/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)||document.activeElement.isContentEditable;
+  if((e.ctrlKey||e.metaKey)&&!e.altKey&&!typing){const k=e.key.toLowerCase();
+    if(k==='z'&&!e.shiftKey){e.preventDefault();undo();return}
+    if((k==='z'&&e.shiftKey)||k==='y'){e.preventDefault();redo();return}
+    if(k==='s'){e.preventDefault();commit();toast(P.ok?'Proyecto guardado':'Guardado no disponible en este navegador');return}}
+});
 document.addEventListener('keydown',e=>{if(e.code!=='Space'||/INPUT|TEXTAREA|BUTTON/.test(document.activeElement.tagName))return;e.preventDefault();if(!S.exporting)S.playing?pause():play()});
 
 /* scrub en la línea de tiempo */
@@ -99,10 +123,10 @@ tlInner.addEventListener('pointerup',()=>scrub=false);tlInner.addEventListener('
 export const toCanvas=e=>{const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*S.W,y:(e.clientY-r.top)/r.height*S.H}};
 cv.addEventListener('pointerdown',e=>{if(S.exporting)return;const p=toCanvas(e);const act=activeAt(S.T);
   if(S.pick){let c=getSel();if(!act.includes(c))c=act[act.length-1];if(!c)return;const m=coverOf(c),nx=(p.x-m.dx)/m.dw,ny=(p.y-m.dy)/m.dh;
-    if(nx<0||nx>1||ny<0||ny>1)return;S.sel=c.id;c.track={seed:{t:localOf(c,S.T),x:nx,y:ny},pts:[]};S.pick=false;renderTimeline();renderPanel();toast('Punto marcado. Ahora toca Rastrear.');return}
+    if(nx<0||nx>1||ny<0||ny>1)return;S.sel=c.id;c.track={seed:{t:localOf(c,S.T),x:nx,y:ny},pts:[]};S.pick=false;renderTimeline();renderPanel();commit();toast('Punto marcado. Ahora toca Rastrear.');return}
   for(let i=S.hits.length-1;i>=0;i--){const h=S.hits[i];if(p.x>=h.x&&p.x<=h.x+h.w&&p.y>=h.y&&p.y<=h.y+h.h){pause();
     const changed=S.selOv!==h.o.id;S.sel=h.c.id;S.selOv=h.o.id;S.drag={o:h.o,sx:h.o.x,sy:h.o.y,px:p.x,py:p.y};cv.setPointerCapture(e.pointerId);
     if(changed){if(S.tab!=='text'){S.tab='text';renderTabs()}renderTimeline();renderPanel()}return}}
   if(act.length){const c=act[act.length-1];if(c.id!==S.sel||S.selOv)selClip(c.id)}});
 cv.addEventListener('pointermove',e=>{if(!S.drag)return;const p=toCanvas(e),d=S.drag;d.o.x=d.sx+(p.x-d.px)/S.W;d.o.y=d.sy+(p.y-d.py)/S.H});
-export const endDrag=()=>{S.drag=null};cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);
+export const endDrag=()=>{if(S.drag){S.drag=null;commit()}};cv.addEventListener('pointerup',endDrag);cv.addEventListener('pointercancel',endDrag);

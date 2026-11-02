@@ -4,6 +4,7 @@ import { seekTo } from './clips.js';
 import { pause } from './playback.js';
 import { renderPanel } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
+import { commit } from './project.js';
 
 /* ---------- rastreo (template matching ZNCC) ----------
    Rastreo 2D por punto:
@@ -39,6 +40,7 @@ function toGrayBlur(data, w, h) {
 
 export async function runTrack(c, silent) {
   if (!c || !c.track || !c.track.seed || S.tracking) return;
+  if (c.missing) { toast('Falta el video de este clip: vuelve a vincularlo en Medios'); return }
   pause(); S.tracking = c.id; S.trackCancel = false; S.trackProg = 0; if (!silent) renderPanel();
   const AH = Math.max(16, Math.round(AW * c.sh / c.sw));
   const ac = document.createElement('canvas'); ac.width = AW; ac.height = AH;
@@ -136,6 +138,7 @@ export async function runTrack(c, silent) {
   S.tracking = null; S.trackProg = 1;
   if (!silent) { toast(S.trackCancel ? 'Rastreo detenido' : lost ? 'Rastreo listo: el objeto se perdió en una parte del clip' : 'Rastreo listo: ' + c.track.pts.length + ' puntos'); renderPanel() }
   renderTimeline();
+  commit();
 }
 
 export function updTrackUI() {

@@ -3,6 +3,7 @@ import { esc, fmtS, fmtT, getSel, getOv } from './util.js';
 import { TR, FILTERS } from './transitions.js';
 import { pickMime, cancelExport } from './export.js';
 import { act } from './actions.js';
+import { P, refreshList } from './project.js';
 
 /* ---------- UI: pestañas ---------- */
 export const TABS=[
@@ -13,7 +14,8 @@ export const TABS=[
   ['text','Texto','<path d="M5 6h14M12 6v13M9 19h6"/>'],
   ['export','Exportar','<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>']];
 export function renderTabs(){$('#tabs').innerHTML=TABS.map(([k,n,ic])=>`<button class="tab" role="tab" data-tab="${k}" aria-selected="${S.tab===k}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ic}</svg>${n}</button>`).join('')}
-export function setTab(t){S.tab=t;if(t!=='track')S.pick=false;renderTabs();renderPanel()}
+export function setTab(t){S.tab=t;if(t!=='track')S.pick=false;renderTabs();renderPanel();
+  if(t==='projects'){refreshList();if(matchMedia('(max-width: 899px)').matches)panel.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'})}}
 
 export const COLORS=['#ffffff','#f1a93b','#4fd1c5','#ef6b5c','#a68bf0','#ffe066','#14161b'];
 export const STICKERS=['⚽','🔥','⭐','👉','❤️','😂','🎯','📍'];
@@ -27,8 +29,11 @@ export function renderPanel(){
     <div class="lbl">Formato del proyecto</div>
     <div class="seg">${['16:9','9:16','1:1'].map(a=>`<button data-act="aspect:${a}" aria-pressed="${S.aspect===a}">${a}</button>`).join('')}</div>
     <div class="lbl">Clips (${S.clips.length})</div>
-    ${S.clips.length?`<ul class="clist">${S.clips.map(k=>`<li data-act="selclip:${k.id}" class="${k.id===S.sel?'sel':''}"><img src="${k.thumb}" alt=""><div><b>${esc(k.name)}</b><span>${fmtS(k.out-k.in)} · ${k.sw}×${k.sh}</span></div>${k.kind==='demo'?'<span class="tag">Ejemplo</span>':''}</li>`).join('')}</ul>`:'<p class="empty">Aún no hay clips. Importa tus videos para empezar.</p>'}
+    ${S.clips.length?`<ul class="clist">${S.clips.map(k=>`<li data-act="selclip:${k.id}" class="${k.id===S.sel?'sel':''}"><img src="${k.thumb}" alt=""><div><b>${esc(k.name)}</b><span>${fmtS(k.out-k.in)} · ${k.sw}×${k.sh}</span></div>${k.kind==='demo'?'<span class="tag">Ejemplo</span>':k.missing?`<button class="tag miss" data-act="relink:${k.id}">Vincular</button>`:''}</li>`).join('')}</ul>`:'<p class="empty">Aún no hay clips. Importa tus videos para empezar.</p>'}
+    ${S.clips.some(k=>k.missing)?'<p class="stat warn">Algunos videos no están guardados en este navegador. Toca <b>Vincular</b> y elige el mismo archivo para recuperarlos.</p>':''}
+    <input type="file" id="relinkIn" accept="video/*" hidden>
     ${S.clips.some(k=>k.kind==='demo')?'<button data-act="clearDemo">Quitar clips de ejemplo</button>':''}`}
+  else if(S.tab==='projects')h=projectsPanel();
   else if(S.tab==='edit'){
     if(!c)h='<h2>Editar clip</h2>'+needClip();else{const i=S.clips.indexOf(c);
     h=`<h2>Editar clip</h2><p class="sub">${esc(c.name)} · ${fmtS(c.out-c.in)}</p>
@@ -99,3 +104,29 @@ export function renderPanel(){
   panel.innerHTML=h;
   $('#pickHint').hidden=!S.pick;
 }
+
+/* ---------- panel de proyectos ---------- */
+const rtf=(()=>{try{return new Intl.RelativeTimeFormat('es',{numeric:'auto'})}catch(e){return null}})();
+function ago(ts){const s=(ts-Date.now())/1000,a=Math.abs(s);if(!rtf)return new Date(ts).toLocaleString('es');
+  if(a<45)return 'hace un momento';if(a<3600)return rtf.format(Math.round(s/60),'minute');if(a<86400)return rtf.format(Math.round(s/3600),'hour');
+  if(a<86400*30)return rtf.format(Math.round(s/86400),'day');return new Date(ts).toLocaleDateString('es')}
+const mb=b=>b>=1073741824?(b/1073741824).toFixed(1).replace('.',',')+' GB':Math.max(.1,b/1048576).toFixed(1).replace('.',',')+' MB';
+export function projectsPanel(){
+  const cur=P.project;
+  if(!P.ok)return `<h2>Proyectos</h2><p class="stat warn">Este navegador no permite guardar datos (por ejemplo, en una ventana privada). Puedes editar y exportar, pero el proyecto se pierde al cerrar la página.</p>`;
+  const st={saved:'Todos los cambios están guardados en este navegador.',saving:'Guardando…',dirty:'Guardando en un momento…',error:'No se pudo guardar el último cambio.',off:''}[P.status]||'';
+  const list=P.list.map(p=>{const isCur=cur&&p.id===cur.id,conf=P.confirmDel===p.id;
+    return `<li class="${isCur?'sel':''}"${isCur?'':` data-act="openProj:${p.id}"`}>
+      ${p.thumb?`<img src="${p.thumb}" alt="">`:'<span class="nothumb" aria-hidden="true"></span>'}
+      <div><b>${esc(p.name)}</b><span>${isCur?'Abierto · ':''}${ago(p.updatedAt)} · ${p.clipsN} ${p.clipsN===1?'clip':'clips'} · ${fmtT(p.dur||0)}</span></div>
+      <button class="mini${conf?' danger':''}" data-act="delProj:${p.id}" aria-label="Eliminar ${esc(p.name)}">${conf?'¿Eliminar?':'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>'}</button></li>`}).join('');
+  const sto=P.storage&&P.storage.quota?`<p class="note">Espacio usado en este navegador: ${mb(P.storage.usage||0)} de ${mb(P.storage.quota)}.</p>`:'';
+  return `<h2>Proyectos</h2>
+    <div class="lbl">Proyecto abierto</div>
+    <input type="text" id="k-pname" data-k="pname" class="txt" value="${esc(cur?cur.name:'')}" maxlength="80" aria-label="Nombre del proyecto">
+    <p class="note">${st}</p>
+    <div class="grid2"><button class="primary" data-act="newProject">Nuevo proyecto</button><button data-act="dupProject">Duplicar</button></div>
+    <div class="lbl">Guardados (${P.list.length})</div>
+    ${P.list.length?`<ul class="clist plist">${list}</ul>`:'<p class="empty">Cargando…</p>'}
+    ${sto}
+    <p class="note">Los proyectos y sus videos se guardan solo en este navegador y este dispositivo. Para pasarlos a otro equipo, exporta el video final.</p>`}

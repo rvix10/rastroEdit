@@ -13,6 +13,8 @@ Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 | **Transiciones** | Corte, Fundido, Destello, Deslizar, Empujar, Zoom, Giro, Barrido, Círculo, Desenfoque y Glitch, con duración ajustable. Los clips se superponen durante la transición y el audio hace crossfade. |
 | **Rastreo** | Marcas un punto y el editor lo sigue cuadro a cuadro, hacia adelante y hacia atrás. |
 | **Texto y stickers** | Texto (3 tipografías, contorno o caja), aro de enfoque y stickers. Cualquier elemento puede seguir el objeto rastreado y se arrastra sobre la vista previa. |
+| **Proyectos** | Autoguardado en el navegador (IndexedDB), con los videos incluidos. Lista de proyectos, nuevo, duplicar, renombrar y eliminar. Si falta un video, se marca y se puede volver a vincular. |
+| **Deshacer / rehacer** | Hasta 60 pasos. Botones en la barra superior, o `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`). `Ctrl+S` fuerza el guardado. |
 | **Exportar** | Graba el lienzo con `MediaRecorder` a MP4 (si el navegador lo soporta) o WebM, con audio. |
 
 ## Cómo correrlo
@@ -52,6 +54,8 @@ js/
   panel.js        panel de herramientas (pestañas)
   timeline-ui.js  dibujo de la línea de tiempo
   actions.js      acciones de UI y eventos de puntero/teclado
+  store.js        acceso a IndexedDB (proyectos, videos, preferencias)
+  project.js      serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer
 ```
 
 ## Rastreo: cómo funciona
@@ -69,13 +73,15 @@ Precisión medida en pruebas: error promedio de ~2 px en el clip de ejemplo y de
 
 - El rastreo es **2D por punto** (posición). No es planar ni de cámara 3D como Mocha: no estima rotación, escala ni perspectiva.
 - La exportación es en **tiempo real**: un video de 30 s tarda 30 s.
-- El proyecto vive en memoria; recargar la página lo pierde.
+- Los proyectos se guardan **solo en ese navegador y dispositivo**: no se sincronizan. En ventanas privadas no se guarda nada.
+- Los videos ocupan espacio del navegador; si se agota, el proyecto se guarda igual pero ese video habrá que volver a vincularlo.
 
 ## Hoja de ruta
 
 - [ ] Tracking de 2 puntos (posición + rotación + escala)
 - [ ] Tracking planar de 4 esquinas (homografía) para reemplazar pantallas y letreros
-- [ ] Guardar y abrir proyectos (IndexedDB)
+- [x] Guardar y abrir proyectos (IndexedDB)
 - [ ] Pista de música y control de volumen por clip
 - [ ] Exportación más rápida que tiempo real con WebCodecs
-- [ ] Deshacer / rehacer
+- [x] Deshacer / rehacer
+- [ ] Exportar / importar proyecto como archivo (.rastro) para pasarlo a otro equipo
