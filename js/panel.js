@@ -118,27 +118,54 @@ export function renderPanel() {
         cls = 'run';
       } else if (n > 1) {
         st =
-          `Rastreo listo · ${n} puntos · de ${fmtS(tr.pts[0].t)} a ${fmtS(tr.pts[n - 1].t)}` +
+          `Rastreo listo · ${tr.seed2 ? '2 puntos, con giro y escala' : '1 punto'} · de ${fmtS(tr.pts[0].t)} a ${fmtS(tr.pts[n - 1].t)}` +
           (tr.lost ? ' · se perdió el objeto en un tramo' : '');
         cls = tr.lost ? 'warn' : 'ok';
       } else if (tr && tr.seed) {
-        st = 'Punto marcado en ' + fmtS(tr.seed.t) + '. Toca Rastrear.';
+        st = (tr.seed2 ? 'Puntos marcados' : 'Punto marcado') + ' en ' + fmtS(tr.seed.t) + '. Toca Rastrear.';
         cls = 'run';
       } else {
         st = 'Este clip no tiene rastreo.';
         cls = '';
       }
+      const two = S.trackPts === 2;
+      const pickLbl = !S.pick
+        ? two
+          ? 'Marcar 2 puntos'
+          : 'Marcar punto'
+        : two
+          ? S.pickFirst
+            ? 'Toca el punto 2…'
+            : 'Toca el punto 1…'
+          : 'Toca la vista previa…';
       h = `<h2>Rastreo de movimiento</h2><p class="sub">Clip: ${esc(c.name)}</p>
-    <ol class="steps"><li>Mueve el cursor a un cuadro donde el objeto se vea nítido.</li><li>Toca <b>Marcar punto</b> y luego el objeto en la vista previa.</li><li>Toca <b>Rastrear</b>: analiza el clip hacia adelante y hacia atrás.</li></ol>
+    <div class="seg" role="group" aria-label="Puntos a rastrear">${[
+      [1, '1 punto'],
+      [2, '2 puntos · giro y escala'],
+    ]
+      .map(
+        ([k, n]) =>
+          `<button data-act="trackPts:${k}" aria-pressed="${S.trackPts === k}" ${busy ? 'disabled' : ''}>${n}</button>`
+      )
+      .join('')}</div>
+    <ol class="steps"><li>Mueve el cursor a un cuadro donde el objeto se vea nítido.</li>${
+      two
+        ? '<li>Toca <b>Marcar 2 puntos</b> y luego dos detalles del mismo objeto, bien separados (por ejemplo, sus extremos).</li>'
+        : '<li>Toca <b>Marcar punto</b> y luego el objeto en la vista previa.</li>'
+    }<li>Toca <b>Rastrear</b>: analiza el clip hacia adelante y hacia atrás.</li></ol>
     <div class="stat ${cls}" id="trkStat">${st}</div>
     <div class="prog" ${busy ? '' : 'hidden'}><i id="progBar" style="width:${S.trackProg * 100}%"></i></div>
     <div class="grid2">
-      <button data-act="pick" class="${S.pick ? 'on' : ''}" ${busy ? 'disabled' : ''}>${S.pick ? 'Toca la vista previa…' : 'Marcar punto'}</button>
+      <button data-act="pick" class="${S.pick ? 'on' : ''}" ${busy ? 'disabled' : ''}>${pickLbl}</button>
       ${busy ? '<button data-act="cancelTrack">Detener</button>' : `<button class="primary" data-act="track" ${tr && tr.seed ? '' : 'disabled'}>Rastrear</button>`}
       <button data-act="followText" ${n > 1 && !busy ? '' : 'disabled'}>Texto que sigue</button>
       <button data-act="clearTrack" ${tr && !busy ? '' : 'disabled'}>Borrar rastreo</button></div>
     <label class="chk"><input type="checkbox" id="k-path" data-k="path" ${S.showPath ? 'checked' : ''}> Mostrar trayectoria en la vista previa</label>
-    <p class="note">Rastreo 2D por punto: funciona mejor con objetos de buen contraste y textura. Si el objeto sale de cuadro o queda tapado, el rastreo se detiene en ese tramo.</p>`;
+    <p class="note">${
+      two
+        ? 'Con 2 puntos, los textos y stickers que siguen al objeto también giran y cambian de tamaño con él. Elige detalles con buen contraste y que no se tapen.'
+        : 'Rastreo 2D por punto: funciona mejor con objetos de buen contraste y textura.'
+    } Si el objeto sale de cuadro o queda tapado, el rastreo se detiene en ese tramo.</p>`;
     }
   } else if (S.tab === 'text') {
     if (!c) h = '<h2>Texto y stickers</h2>' + needClip();
@@ -175,6 +202,12 @@ export function renderPanel() {
       ${o.kind !== 'sticker' ? `<div class="lbl">Color</div><div class="swatches">${COLORS.map(col => `<button class="sw" style="background:${col}" data-act="color:${col}" aria-pressed="${o.color === col}" aria-label="Color ${col}"></button>`).join('')}</div>` : ''}
       <div class="field"><span>Tamaño</span><input type="range" id="k-ovsize" data-k="ovsize" min="0.025" max="0.3" step="0.005" value="${o.size}"><output id="o-ovsize">${Math.round(o.size * 100)}</output></div>
       <label class="chk"><input type="checkbox" id="k-follow" data-k="follow" ${o.follow ? 'checked' : ''} ${has ? '' : 'disabled'}> Seguir el objeto rastreado${has ? '' : ' (primero rastrea este clip)'}</label>
+      ${
+        o.follow && has && c.track.seed2
+          ? `<label class="chk"><input type="checkbox" id="k-followRot" data-k="followRot" ${o.followRot !== false ? 'checked' : ''}> Girar con el objeto</label>
+      <label class="chk"><input type="checkbox" id="k-followScale" data-k="followScale" ${o.followScale !== false ? 'checked' : ''}> Cambiar de tamaño con el objeto</label>`
+          : ''
+      }
       <div class="lbl">Visible</div><p class="note" id="ovRange">De ${fmtS(Math.max(o.t0, c.in) - c.in)} a ${fmtS(Math.min(o.t1, c.out) - c.in)} del clip</p>
       <div class="grid3"><button data-act="ovFrom">Desde aquí</button><button data-act="ovTo">Hasta aquí</button><button data-act="ovAll">Todo el clip</button></div>
       <div class="lbl">Animación de entrada</div><div class="seg">${[

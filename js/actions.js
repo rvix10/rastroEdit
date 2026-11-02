@@ -1,8 +1,8 @@
 import { $, cv, panel, tlInner, tlScroll, S, nid, setAspect } from './state.js';
 import { fmtS, toast, getSel, getOv } from './util.js';
-import { coverOf, mapSrc, importFiles, cloneClip } from './clips.js';
+import { coverOf, importFiles, cloneClip } from './clips.js';
 import { layout, activeAt, localOf } from './timeline.js';
-import { trackAt } from './render.js';
+import { ovPos, ovSetAbs } from './render.js';
 import { play, pause, seek } from './playback.js';
 import { runTrack } from './tracker.js';
 import { startExport, cancelExport, saveResult } from './export.js';
@@ -29,6 +29,9 @@ export function selClip(id) {
   S.sel = id;
   S.selOv = null;
   S.pick = false;
+  S.pickFirst = null;
+  const c = getSel();
+  if (c && c.track && c.track.seed) S.trackPts = c.track.seed2 ? 2 : 1;
   renderTimeline();
   renderPanel();
 }
@@ -73,20 +76,23 @@ export function addOv(kind, extra) {
     ta.select();
   }
 }
-export function toggleFollow(o, on) {
+// Tiempo local del clip del overlay en el cursor (o su inicio si el cursor está en otro clip)
+function ovLocal(o) {
   const c = S.clips.find(k => k.id === o.clipId);
-  const local = activeAt(S.T).includes(c) ? localOf(c, S.T) : c.in;
-  const tp = trackAt(c, local);
-  if (!tp) return;
-  const m = mapSrc(c, tp.x, tp.y);
-  if (on) {
-    o.x -= m.x / S.W;
-    o.y -= m.y / S.H;
-  } else {
-    o.x += m.x / S.W;
-    o.y += m.y / S.H;
-  }
-  o.follow = on;
+  return { c, local: activeAt(S.T).includes(c) ? localOf(c, S.T) : c.in };
+}
+/** Cambia opciones de seguimiento sin que el elemento salte de lugar en el cuadro actual. */
+export function setFollow(o, patch) {
+  const { c, local } = ovLocal(o);
+  if (!c) return;
+  const abs = ovPos(o, c, local);
+  Object.assign(o, patch);
+  ovSetAbs(o, c, local, abs.x, abs.y);
+}
+export function toggleFollow(o, on) {
+  const { c } = ovLocal(o);
+  if (!c || !c.track || c.track.pts.length < 2) return;
+  setFollow(o, { follow: on });
 }
 export function doSplit() {
   const c = getSel();
@@ -226,8 +232,14 @@ export function act(a, el) {
       seek(Math.max(0, c._start - 0.8));
       play();
       break;
+    case 'trackPts':
+      S.trackPts = arg === '2' ? 2 : 1;
+      S.pickFirst = null;
+      renderPanel();
+      break;
     case 'pick':
       S.pick = !S.pick;
+      S.pickFirst = null;
       if (S.pick) {
         pause();
         if (!activeAt(S.T).includes(c)) seek(c._start + Math.min(0.5, c._len / 2));
@@ -242,6 +254,7 @@ export function act(a, el) {
       break;
     case 'clearTrack':
       c.track = null;
+      S.pickFirst = null;
       S.ovs.forEach(x => {
         if (x.clipId === c.id && x.follow) {
           x.follow = false;
@@ -411,6 +424,11 @@ panel.addEventListener('change', e => {
     const o = getOv();
     if (o) toggleFollow(o, t.checked);
     renderTimeline();
+    renderPanel();
+  }
+  if (t.dataset.k === 'followRot' || t.dataset.k === 'followScale') {
+    const o = getOv();
+    if (o) setFollow(o, { [t.dataset.k]: t.checked });
   }
   commit();
 });
@@ -538,12 +556,28 @@ cv.addEventListener('pointerdown', e => {
       ny = (p.y - m.dy) / m.dh;
     if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return;
     S.sel = c.id;
-    c.track = { seed: { t: localOf(c, S.T), x: nx, y: ny }, pts: [] };
+    const t = localOf(c, S.T);
+    // Rastreo de 2 puntos: el primer toque queda pendiente hasta el segundo, en el mismo cuadro
+    if (S.trackPts === 2) {
+      const f = S.pickFirst;
+      if (!f || f.clipId !== c.id || Math.abs(f.t - t) > 0.02) {
+        S.pickFirst = { clipId: c.id, t, x: nx, y: ny };
+        renderPanel();
+        toast('Ahora toca el punto 2: otro detalle del mismo objeto, lejos del primero');
+        return;
+      }
+      if (Math.hypot((nx - f.x) * c.sw, (ny - f.y) * c.sh) < Math.max(c.sw, c.sh) * 0.03) {
+        toast('Los puntos están muy juntos: elige uno más lejos del primero');
+        return;
+      }
+      c.track = { seed: { t: f.t, x: f.x, y: f.y }, seed2: { x: nx, y: ny }, pts: [] };
+      S.pickFirst = null;
+    } else c.track = { seed: { t, x: nx, y: ny }, pts: [] };
     S.pick = false;
     renderTimeline();
     renderPanel();
     commit();
-    toast('Punto marcado. Ahora toca Rastrear.');
+    toast(c.track.seed2 ? 'Puntos marcados. Ahora toca Rastrear.' : 'Punto marcado. Ahora toca Rastrear.');
     return;
   }
   for (let i = S.hits.length - 1; i >= 0; i--) {
@@ -553,7 +587,9 @@ cv.addEventListener('pointerdown', e => {
       const changed = S.selOv !== h.o.id;
       S.sel = h.c.id;
       S.selOv = h.o.id;
-      S.drag = { o: h.o, sx: h.o.x, sy: h.o.y, px: p.x, py: p.y };
+      const local = localOf(h.c, S.T),
+        abs = ovPos(h.o, h.c, local);
+      S.drag = { o: h.o, c: h.c, local, ax: abs.x, ay: abs.y, px: p.x, py: p.y };
       cv.setPointerCapture(e.pointerId);
       if (changed) {
         if (S.tab !== 'text') {
@@ -575,8 +611,8 @@ cv.addEventListener('pointermove', e => {
   if (!S.drag) return;
   const p = toCanvas(e),
     d = S.drag;
-  d.o.x = d.sx + (p.x - d.px) / S.W;
-  d.o.y = d.sy + (p.y - d.py) / S.H;
+  // En pantalla se mueve 1:1; si sigue al objeto, se guarda como desplazamiento en su cuadro de referencia
+  ovSetAbs(d.o, d.c, d.local, d.ax + (p.x - d.px), d.ay + (p.y - d.py));
 });
 export const endDrag = () => {
   if (S.drag) {

@@ -65,17 +65,82 @@ export function trackAt(c, local) {
   const a = P[lo],
     b = P[hi],
     k = (local - a.t) / (b.t - a.t || 1);
-  return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+  const r = { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+  if (a.x2 != null && b.x2 != null) {
+    r.x2 = a.x2 + (b.x2 - a.x2) * k;
+    r.y2 = a.y2 + (b.y2 - a.y2) * k;
+  }
+  return r;
 }
-export function ovPos(o, c, local) {
-  if (o.follow) {
-    const tp = trackAt(c, local);
-    if (tp) {
-      const m = mapSrc(c, tp.x, tp.y);
-      return { x: m.x + o.x * S.W, y: m.y + o.y * S.H };
+
+/** Ángulo (rad) y largo del segmento punto 1 → punto 2, en píxeles del video fuente. */
+function seg(c, p) {
+  const dx = (p.x2 - p.x) * c.sw,
+    dy = (p.y2 - p.y) * c.sh;
+  return { ang: Math.atan2(dy, dx), len: Math.hypot(dx, dy) };
+}
+/**
+ * Movimiento del objeto rastreado en `local`: ancla (punto 1) en el lienzo y, con rastreo de 2 puntos,
+ * giro (rad, sentido horario) y escala respecto del cuadro donde se marcaron los puntos.
+ */
+export function trackXform(c, local) {
+  const tp = trackAt(c, local);
+  if (!tp) return null;
+  const m = mapSrc(c, tp.x, tp.y),
+    r = { x: m.x, y: m.y, rot: 0, scale: 1, two: false };
+  const s0 = c.track.seed2 && { ...c.track.seed, x2: c.track.seed2.x, y2: c.track.seed2.y };
+  if (s0 && tp.x2 != null) {
+    const a = seg(c, s0),
+      b = seg(c, tp);
+    if (a.len > 1e-6) {
+      r.rot = b.ang - a.ang;
+      r.scale = b.len / a.len;
+      r.two = true;
     }
   }
-  return { x: o.x * S.W, y: o.y * S.H };
+  return r;
+}
+/** Giro y escala que hereda un overlay (cada uno se puede apagar en el panel). */
+function inherit(o, xf) {
+  return {
+    rot: xf.two && o.followRot !== false ? xf.rot : 0,
+    scale: xf.two && o.followScale !== false ? xf.scale : 1,
+  };
+}
+/**
+ * Posición del overlay en el lienzo, con el giro y la escala que hereda.
+ * Si sigue al objeto, o.x/o.y es un desplazamiento (normalizado al lienzo) en el cuadro de los
+ * puntos marcados: también gira y escala con el objeto, así un texto puesto "arriba" queda arriba.
+ */
+export function ovPos(o, c, local) {
+  if (o.follow) {
+    const xf = trackXform(c, local);
+    if (xf) {
+      const h = inherit(o, xf),
+        ox = o.x * S.W,
+        oy = o.y * S.H,
+        cs = Math.cos(h.rot) * h.scale,
+        sn = Math.sin(h.rot) * h.scale;
+      return { x: xf.x + cs * ox - sn * oy, y: xf.y + sn * ox + cs * oy, rot: h.rot, scale: h.scale };
+    }
+  }
+  return { x: o.x * S.W, y: o.y * S.H, rot: 0, scale: 1 };
+}
+/** Pone el overlay en (X, Y) del lienzo (inverso de ovPos): para arrastrar y para activar "seguir". */
+export function ovSetAbs(o, c, local, X, Y) {
+  const xf = o.follow && trackXform(c, local);
+  if (!xf) {
+    o.x = X / S.W;
+    o.y = Y / S.H;
+    return;
+  }
+  const h = inherit(o, xf),
+    dx = (X - xf.x) / h.scale,
+    dy = (Y - xf.y) / h.scale,
+    cs = Math.cos(-h.rot),
+    sn = Math.sin(-h.rot);
+  o.x = (cs * dx - sn * dy) / S.W;
+  o.y = (sn * dx + cs * dy) / S.H;
 }
 export const FONTS = {
   impacto: s => `800 ${s}px Unbounded, Manrope, system-ui, sans-serif`,
@@ -99,7 +164,9 @@ export function drawOverlay(g, o, pos, alpha, age, local) {
   g.save();
   g.globalAlpha = clamp(a, 0, 1);
   g.translate(pos.x, pos.y);
-  g.scale(sc, sc);
+  if (pos.rot) g.rotate(pos.rot);
+  const ps = pos.scale || 1;
+  g.scale(sc * ps, sc * ps);
   if (o.kind === 'ring') {
     const r = o.size * H * 0.6,
       lw = Math.max(3, H * 0.007);
@@ -156,7 +223,13 @@ export function drawOverlay(g, o, pos, alpha, age, local) {
     bb = { w: w + pad * 2, h: h + pad * 1.2 };
   }
   g.restore();
-  return { x: pos.x - bb.w / 2, y: pos.y - bb.h / 2, w: bb.w, h: bb.h };
+  // Caja para tocar/arrastrar: la que encierra al elemento ya girado y escalado
+  const ps2 = pos.scale || 1,
+    cr = Math.abs(Math.cos(pos.rot || 0)),
+    sr = Math.abs(Math.sin(pos.rot || 0));
+  const w = (bb.w * cr + bb.h * sr) * ps2,
+    h = (bb.w * sr + bb.h * cr) * ps2;
+  return { x: pos.x - w / 2, y: pos.y - h / 2, w, h };
 }
 export function drawOverlaysFor(c, local, alpha) {
   for (const o of S.ovs) {
@@ -210,25 +283,33 @@ export function drawGuides(T, act) {
   const local = localOf(c, T),
     lw = Math.max(2, S.H * 0.003);
   if (S.showPath && c.track && c.track.pts.length > 1) {
+    const two = c.track.pts[0].x2 != null;
     ctx.save();
     ctx.strokeStyle = 'rgba(79,209,197,.9)';
-    ctx.lineWidth = lw;
-    ctx.setLineDash([lw * 3, lw * 2]);
-    ctx.beginPath();
-    c.track.pts.forEach((p, i) => {
-      const m = mapSrc(c, p.x, p.y);
-      i ? ctx.lineTo(m.x, m.y) : ctx.moveTo(m.x, m.y);
-    });
-    ctx.stroke();
-    ctx.setLineDash([]);
     ctx.fillStyle = '#4fd1c5';
-    c.track.pts.forEach((p, i) => {
-      if (i % 5) return;
-      const m = mapSrc(c, p.x, p.y);
+    ctx.lineWidth = lw;
+    for (const [kx, ky] of two
+      ? [
+          ['x', 'y'],
+          ['x2', 'y2'],
+        ]
+      : [['x', 'y']]) {
+      ctx.setLineDash([lw * 3, lw * 2]);
       ctx.beginPath();
-      ctx.arc(m.x, m.y, lw * 1.3, 0, Math.PI * 2);
-      ctx.fill();
-    });
+      c.track.pts.forEach((p, i) => {
+        const m = mapSrc(c, p[kx], p[ky]);
+        i ? ctx.lineTo(m.x, m.y) : ctx.moveTo(m.x, m.y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+      c.track.pts.forEach((p, i) => {
+        if (i % 5) return;
+        const m = mapSrc(c, p[kx], p[ky]);
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, lw * 1.3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
     const cur = trackAt(c, local);
     if (cur) {
       const m = mapSrc(c, cur.x, cur.y),
@@ -236,16 +317,30 @@ export function drawGuides(T, act) {
       ctx.strokeStyle = '#4fd1c5';
       ctx.lineWidth = lw;
       ctx.strokeRect(m.x - b / 2, m.y - b / 2, b, b);
+      if (cur.x2 != null) {
+        const m2 = mapSrc(c, cur.x2, cur.y2);
+        ctx.strokeRect(m2.x - b / 2, m2.y - b / 2, b, b);
+        ctx.beginPath();
+        ctx.moveTo(m.x, m.y);
+        ctx.lineTo(m2.x, m2.y);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   }
-  if (c.track && c.track.seed) {
-    const s = c.track.seed,
-      m = mapSrc(c, s.x, s.y),
+  // Puntos marcados (y el primero mientras se espera el segundo)
+  const marks =
+    S.pickFirst && S.pickFirst.clipId === c.id
+      ? [S.pickFirst]
+      : [c.track && c.track.seed, c.track && c.track.seed2].filter(Boolean);
+  ctx.save();
+  ctx.strokeStyle = '#f1a93b';
+  ctx.fillStyle = '#f1a93b';
+  ctx.lineWidth = lw;
+  ctx.font = `800 ${Math.round(S.H * 0.026)}px Manrope, system-ui, sans-serif`;
+  marks.forEach((s, i) => {
+    const m = mapSrc(c, s.x, s.y),
       r = S.H * 0.02;
-    ctx.save();
-    ctx.strokeStyle = '#f1a93b';
-    ctx.lineWidth = lw;
     ctx.beginPath();
     ctx.moveTo(m.x - r * 1.8, m.y);
     ctx.lineTo(m.x - r * 0.6, m.y);
@@ -256,6 +351,7 @@ export function drawGuides(T, act) {
     ctx.moveTo(m.x, m.y + r * 0.6);
     ctx.lineTo(m.x, m.y + r * 1.8);
     ctx.stroke();
-    ctx.restore();
-  }
+    if (marks.length > 1 || S.pickFirst) ctx.fillText(String(i + 1), m.x + r * 0.9, m.y - r * 0.9);
+  });
+  ctx.restore();
 }

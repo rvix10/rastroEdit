@@ -75,6 +75,27 @@ function ensureExtra() {
     out[name] = f;
   };
   for (const [name, args] of Object.entries(EXTRA)) run(name, args);
+  // Objeto con textura que gira 0,5·t rad (sentido horario) y crece ×(1 + 0,2·t), centro en (500 + 60t, 360)
+  run('rotscale.webm', [
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=s=1280x720:d=4:r=30',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=s=160x160:r=30,loop=loop=-1:size=1:start=0,trim=duration=4',
+    '-filter_complex',
+    "[0:v]hue=s=0.2,eq=brightness=-0.25[bg];[1:v]format=rgba,rotate=a='0.5*t':c=none:ow=232:oh=232," +
+      "scale=w='trunc(232*(1+0.2*t)/2)*2':h='trunc(232*(1+0.2*t)/2)*2':eval=frame[o];" +
+      "[bg][o]overlay=x='500+60*t-w/2':y='360-h/2':eval=frame,format=yuv420p[v]",
+    '-map',
+    '[v]',
+    '-c:v',
+    'libvpx',
+    '-b:v',
+    '4M',
+  ]);
   // Video de celular girado: solo se marca la rotación (sin recodificar)
   if (out['vp9.mp4']) run('rot90.mp4', ['-display_rotation', '90', '-i', out['vp9.mp4'], '-c', 'copy']);
   return out;
@@ -444,8 +465,137 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     await ctx.close();
   }
 
-  // Rotación de videos de celular: lo que dibuja el decodificador = lo que muestra <video>
   const extra = ensureExtra();
+
+  // Rastreo de 2 puntos: giro y escala, desde la interfaz
+  if (extra['rotscale.webm']) {
+    console.log('\nRastreo de 2 puntos (objeto que gira y crece)');
+    const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+    const errs = [];
+    page.on('pageerror', e => errs.push(e.message));
+    page.on('console', m => m.type() === 'error' && errs.push(m.text()));
+    await page.goto(url);
+    await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+    await page.click('[data-tab="media"]');
+    await page.setInputFiles('#fileIn', extra['rotscale.webm']);
+    await until(page, async () => (await import('/js/state.js')).S.clips.some(c => c.kind === 'video'), null, 20000);
+    // Posición real de un detalle del objeto (u, v en px del objeto, desde su centro) en el tiempo t
+    const W = (u, v, t) => {
+      const s = 1 + 0.2 * t,
+        a = 0.5 * t;
+      return {
+        x: 500 + 60 * t + s * (Math.cos(a) * u - Math.sin(a) * v),
+        y: 360 + s * (Math.sin(a) * u + Math.cos(a) * v),
+      };
+    };
+    await page.evaluate(`(async () => { ${mods} ac.act('clearDemo'); st.S.T = st.S.clips[0]._start + 1; })()`);
+    await page.click('[data-tab="track"]');
+    await page.click('[data-act="trackPts:2"]');
+    await page.click('[data-act="pick"]');
+    await page.waitForTimeout(300);
+    const box = await page.$eval('#stage', e => {
+      const r = e.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height };
+    });
+    const tap = p => page.mouse.click(box.x + (p.x / 1280) * box.w, box.y + (p.y / 720) * box.h);
+    await tap(W(-45, -35, 1));
+    await tap(W(40, 30, 1));
+    const marked = await page.evaluate(
+      `(async () => { ${mods} const t = st.S.clips[0].track; return !!(t && t.seed && t.seed2) })()`
+    );
+    check(marked, 'marca 2 puntos con dos toques en la vista previa');
+    await page.click('[data-act="track"]');
+    await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        return !S.tracking && S.clips[0].track.pts.length > 10;
+      },
+      null,
+      90000
+    );
+    const tr = await page.evaluate(
+      `(async () => { ${mods} const rd = await import('/js/render.js'), c = st.S.clips[0];
+        const W = ${W.toString()};
+        return [2, 3, 3.8].map(t => { const xf = rd.trackXform(c, t), tp = rd.trackAt(c, t), a = W(-45, -35, t), b = W(40, 30, t);
+          return { t, drot: Math.abs(xf.rot - 0.5 * (t - 1)), dsc: Math.abs(xf.scale / ((1 + 0.2 * t) / 1.2) - 1),
+            err: Math.max(Math.hypot(tp.x * 1280 - a.x, tp.y * 720 - a.y), Math.hypot(tp.x2 * 1280 - b.x, tp.y2 * 720 - b.y)) } }) })()`
+    );
+    const worst = k => Math.max(...tr.map(x => x[k]));
+    check(worst('drot') < 0.05, `giro medido (error máx. ${((worst('drot') * 180) / Math.PI).toFixed(1)}°)`);
+    check(worst('dsc') < 0.03, `escala medida (error máx. ${(worst('dsc') * 100).toFixed(1)} %)`);
+    check(worst('err') < 12, `los dos puntos siguen al objeto (error máx. ${worst('err').toFixed(1)} px)`);
+
+    // Texto anclado 70 px "arriba" del objeto: gira y crece con él
+    await page.evaluate(`(async () => { ${mods} ac.addOv('text', { text: 'Arriba' }); })()`);
+    await page.click('#k-follow');
+    const ov = await page.evaluate(
+      `(async () => { ${mods} const rd = await import('/js/render.js'), c = st.S.clips[0], o = st.S.ovs[st.S.ovs.length - 1];
+        const W = ${W.toString()}, top = W(0, -70, 1);
+        rd.ovSetAbs(o, c, 1, top.x, top.y);
+        const err = Math.max(...[2, 3, 3.8].map(t => { const p = rd.ovPos(o, c, t), e = W(0, -70, t); return Math.hypot(p.x - e.x, p.y - e.y) }));
+        const rot3 = rd.ovPos(o, c, 3).rot;
+        const hasOpts = !!document.querySelector('#k-followRot') && !!document.querySelector('#k-followScale');
+        return { err, rot3, hasOpts } })()`
+    );
+    check(ov.hasOpts, 'el panel ofrece girar y cambiar de tamaño con el objeto');
+    check(
+      ov.err < 12 && Math.abs(ov.rot3 - 1) < 0.05,
+      `el texto sigue posición, giro y escala (error máx. ${ov.err.toFixed(1)} px)`
+    );
+    // Apagar el giro no mueve el texto en el cuadro actual
+    const noJump = await page.evaluate(
+      `(async () => { ${mods} const rd = await import('/js/render.js'), c = st.S.clips[0], o = st.S.ovs[st.S.ovs.length - 1];
+        st.S.T = c._start + 3; const a = rd.ovPos(o, c, 3); ac.setFollow(o, { followRot: false }); const b = rd.ovPos(o, c, 3);
+        return { jump: Math.hypot(a.x - b.x, a.y - b.y), rot: b.rot } })()`
+    );
+    check(noJump.jump < 0.5 && noJump.rot === 0, 'apagar el giro no hace saltar el texto');
+    // Arrastrar en la vista previa: se mueve lo mismo que el puntero
+    await page.waitForTimeout(200);
+    const drag = await page.evaluate(
+      `(async () => { ${mods} const rd = await import('/js/render.js'), c = st.S.clips[0], o = st.S.ovs[st.S.ovs.length - 1];
+        const p = rd.ovPos(o, c, 3); return { x: p.x, y: p.y } })()`
+    );
+    const toScreen = p => ({ x: box.x + (p.x / 1280) * box.w, y: box.y + (p.y / 720) * box.h });
+    const a = toScreen(drag);
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(a.x + 40, a.y + 25, { steps: 5 });
+    await page.mouse.up();
+    const moved = await page.evaluate(
+      `(async () => { ${mods} const rd = await import('/js/render.js'), c = st.S.clips[0], o = st.S.ovs[st.S.ovs.length - 1];
+        const p = rd.ovPos(o, c, 3); return { x: p.x, y: p.y } })()`
+    );
+    const want = { x: drag.x + (40 / box.w) * 1280, y: drag.y + (25 / box.h) * 720 };
+    check(Math.hypot(moved.x - want.x, moved.y - want.y) < 2, 'arrastrar un texto que gira lo mueve igual que el dedo');
+    // Se guarda con el proyecto
+    await page.evaluate(`(async () => { ${mods} await pj.saveNow(); })()`);
+    await page.reload();
+    const kept = await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        const c = S.clips[0],
+          o = S.ovs[S.ovs.length - 1];
+        return (
+          S.clips.length === 1 &&
+          c.track &&
+          c.track.seed2 &&
+          c.track.pts[5].x2 != null &&
+          o &&
+          o.follow &&
+          o.followRot === false
+        );
+      },
+      null,
+      15000
+    );
+    check(kept, 'tras recargar, se conservan los 2 puntos y las opciones del texto');
+    check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
+    await page.close();
+  }
+
+  // Rotación de videos de celular: lo que dibuja el decodificador = lo que muestra <video>
   if (extra['rot90.mp4']) {
     console.log('\nVideo girado (rotación en el archivo)');
     const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });

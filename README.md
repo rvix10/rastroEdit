@@ -1,7 +1,7 @@
 # Rastro Editor
 
 Editor de video que corre en el navegador (celular y PC), sin servidor ni instalación.
-Interfaz inspirada en Adobe Rush, transiciones tipo LightCut y rastreo de movimiento por punto.
+Interfaz inspirada en Adobe Rush, transiciones tipo LightCut y rastreo de movimiento por punto (o por dos puntos, con giro y escala).
 Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 
 ## Funciones
@@ -11,7 +11,7 @@ Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 | **Medios** | Importa varios videos (MP4, WebM, MOV según el navegador). Formato del proyecto 16:9, 9:16 o 1:1. |
 | **Editar** | Recorte de inicio y fin, dividir en el cursor, duplicar, reordenar, silenciar, filtros (Cálido, Frío, B/N, Vívido, Cine). |
 | **Transiciones** | Corte, Fundido, Destello, Deslizar, Empujar, Zoom, Giro, Barrido, Círculo, Desenfoque y Glitch, con duración ajustable. Los clips se superponen durante la transición y el audio hace crossfade. |
-| **Rastreo** | Marcas un punto y el editor lo sigue cuadro a cuadro, hacia adelante y hacia atrás. |
+| **Rastreo** | Marcas un punto y el editor lo sigue cuadro a cuadro, hacia adelante y hacia atrás. Con **2 puntos** sobre el mismo objeto mide también su giro y su escala: los textos y stickers que lo siguen giran y cambian de tamaño con él (se puede apagar cada cosa por elemento). |
 | **Texto y stickers** | Texto (3 tipografías, contorno o caja), aro de enfoque y stickers. Cualquier elemento puede seguir el objeto rastreado y se arrastra sobre la vista previa. |
 | **Proyectos** | Autoguardado en el navegador (IndexedDB), con los videos incluidos. Lista de proyectos, nuevo, duplicar, renombrar y eliminar. Si falta un video, se marca y se puede volver a vincular. |
 | **Pasar a otro equipo** | *Guardar .rastro* crea un archivo con el proyecto y sus videos; *Abrir .rastro* lo agrega como proyecto nuevo en otro navegador o dispositivo. |
@@ -82,19 +82,19 @@ rastrea un objeto de trayectoria conocida, exporta y revisa que no haya errores 
 2. Busca un parche de 21×21 en una ventana de ±24 px alrededor de la posición predicha (posición + velocidad), comparando contra la plantilla original y una adaptativa.
 3. Refina con ajuste subpíxel (parábola).
 4. Si el objeto se tapa unos cuadros, predice con la velocidad hasta 4 cuadros. Si sale de cuadro o no se recupera con confianza, marca el tramo como perdido.
+5. Con **2 puntos**, ambos se buscan sobre los mismos cuadros. El ángulo y la distancia entre ellos, comparados con el cuadro donde se marcaron, dan el giro y la escala. Ese giro y escala previstos se usan para deformar la plantilla original de cada punto antes de compararla: sin esto, al girar el objeto la plantilla deja de parecerse y el rastreo se desvía (en la prueba, de 29 px a 7 px de error tras 2,8 s y 80° de giro).
 
 Precisión medida en pruebas: error promedio de ~2 px en el clip de ejemplo y de ~6 px en un video real de 1280×720 (objeto con textura sobre fondo cambiante).
 
 ## Limitaciones conocidas
 
-- El rastreo es **2D por punto** (posición). No es planar ni de cámara 3D como Mocha: no estima rotación, escala ni perspectiva.
-- La exportación es en **tiempo real**: un video de 30 s tarda 30 s.
+- El rastreo es 2D: por punto (posición) o por 2 puntos (posición, giro y escala). No es planar ni de cámara 3D como Mocha: no estima perspectiva.
 - Los proyectos se guardan **solo en ese navegador y dispositivo**: no se sincronizan. En ventanas privadas no se guarda nada.
 - Los videos ocupan espacio del navegador; si se agota, el proyecto se guarda igual pero ese video habrá que volver a vincularlo.
 
 ## Hoja de ruta
 
-- [ ] Tracking de 2 puntos (posición + rotación + escala)
+- [x] Tracking de 2 puntos (posición + rotación + escala)
 - [ ] Tracking planar de 4 esquinas (homografía) para reemplazar pantallas y letreros
 - [x] Guardar y abrir proyectos (IndexedDB)
 - [ ] Pista de música y control de volumen por clip

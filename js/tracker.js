@@ -7,7 +7,7 @@ import { renderTimeline } from './timeline-ui.js';
 import { commit } from './project.js';
 
 /* ---------- rastreo (template matching ZNCC) ----------
-   Rastreo 2D por punto:
+   Rastreo 2D por punto (uno o dos; con dos se calcula también giro y escala, ver trackXform en render.js):
    1. Cada cuadro se reduce a AW px de ancho, se pasa a gris y se desenfoca
       (dos pasadas de caja 3×3) para tolerar rotación, ruido y compresión.
    2. Se busca el parche de referencia en una ventana ±R alrededor de la
@@ -99,6 +99,27 @@ export async function runTrack(c, silent) {
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) p[j * N + i] = f[(cy - PR + j) * AW + cx - PR + i];
     return p;
   };
+  // Parche de f alrededor de (cx, cy) visto girado `rot` y escalado `sc`: así se ve la plantilla original
+  // cuando el objeto ya giró/cambió de tamaño (rastreo de 2 puntos). Muestreo bilineal.
+  const patchWarp = (f, cx, cy, rot, sc) => {
+    const p = new Float32Array(NN),
+      cs = Math.cos(-rot) / sc,
+      sn = Math.sin(-rot) / sc;
+    for (let j = 0; j < N; j++)
+      for (let i = 0; i < N; i++) {
+        const dx = i - PR,
+          dy = j - PR;
+        const x = clamp(cx + cs * dx - sn * dy, 0, AW - 1.001),
+          y = clamp(cy + sn * dx + cs * dy, 0, AH - 1.001);
+        const x0 = x | 0,
+          y0 = y | 0,
+          fx = x - x0,
+          fy = y - y0,
+          o = y0 * AW + x0;
+        p[j * N + i] = (f[o] * (1 - fx) + f[o + 1] * fx) * (1 - fy) + (f[o + AW] * (1 - fx) + f[o + AW + 1] * fx) * fy;
+      }
+    return p;
+  };
   const norm = p => {
     let m = 0;
     for (const v of p) m += v;
@@ -170,62 +191,86 @@ export async function runTrack(c, silent) {
     return { x: fx, y: fy, s: best.s };
   };
 
+  // Uno o dos puntos (con dos se obtiene además giro y escala). Se siguen juntos, sobre los mismos cuadros.
   const seed = c.track.seed,
-    f0 = await grab(seed.t),
-    px = seed.x * AW,
-    py = seed.y * AH;
-  const base = patch(f0, px, py),
-    baseN = norm(base);
+    seed2 = c.track.seed2 || null,
+    f0 = await grab(seed.t);
+  const seeds = [seed, ...(seed2 ? [seed2] : [])].map(p => ({ x: p.x * AW, y: p.y * AH }));
+  const bases = seeds.map(p => {
+    const b = patch(f0, p.x, p.y);
+    return { b, n: norm(b) };
+  });
   const fwd = [],
     back = [],
     steps = Math.max(1, Math.ceil((c.out - c.in) / DT));
   let done = 0,
     lost = false;
+  const entry = (t, st) => ({
+    t,
+    x: st[0].x / AW,
+    y: st[0].y / AH,
+    ...(st[1] ? { x2: st[1].x / AW, y2: st[1].y / AH } : {}),
+  });
+  const first = { t: seed.t, x: seed.x, y: seed.y, ...(seed2 ? { x2: seed2.x, y2: seed2.y } : {}) };
   const rebuild = () => {
-    c.track.pts = [...back.slice().reverse(), { t: seed.t, x: seed.x, y: seed.y }, ...fwd];
+    c.track.pts = [...back.slice().reverse(), first, ...fwd];
   };
+  const outside = (x, y) => x < PR || x > AW - PR - 1 || y < PR || y > AH - PR - 1;
 
   for (const dir of [1, -1]) {
-    let x = px,
-      y = py,
-      vx = 0,
-      vy = 0,
-      misses = 0;
-    const tpl = Float32Array.from(base),
-      arr = dir > 0 ? fwd : back,
+    const st = seeds.map((p, k) => ({ x: p.x, y: p.y, vx: 0, vy: 0, misses: 0, tpl: Float32Array.from(bases[k].b) }));
+    const arr = dir > 0 ? fwd : back,
       pending = [];
     for (let t = seed.t + dir * DT; dir > 0 ? t <= c.out + 1e-6 : t >= c.in - 1e-6; t += dir * DT) {
       if (S.trackCancel) break;
       const f = await grab(clamp(t, 0, c.dur - 0.001));
-      const m = match(f, [baseN, norm(tpl)], x + vx, y + vy);
-      const outside = x + vx < PR || x + vx > AW - PR - 1 || y + vy < PR || y + vy > AH - PR - 1;
-      if (outside) {
-        lost = true;
-        break;
-      } // el objeto sale de cuadro
-      // tras cuadros perdidos se exige más confianza para no "recuperar" otra cosa
-      if (m.s < (misses ? RECOVER_SCORE : MIN_SCORE)) {
-        if (++misses > MAX_MISSES) {
-          lost = true;
+      let stop = false;
+      // Con 2 puntos: giro y escala previstos para este cuadro, para deformar las plantillas originales
+      let warp = null;
+      if (st.length === 2) {
+        const ax = st[1].x + st[1].vx - (st[0].x + st[0].vx),
+          ay = st[1].y + st[1].vy - (st[0].y + st[0].vy),
+          bx = seeds[1].x - seeds[0].x,
+          by = seeds[1].y - seeds[0].y;
+        const sc = Math.hypot(ax, ay) / (Math.hypot(bx, by) || 1);
+        if (sc > 0.2 && sc < 5) warp = { rot: Math.atan2(ay, ax) - Math.atan2(by, bx), sc };
+      }
+      for (let k = 0; k < st.length && !stop; k++) {
+        const p = st[k],
+          px = p.x + p.vx,
+          py = p.y + p.vy;
+        if (outside(px, py)) {
+          stop = true; // el punto sale de cuadro
           break;
         }
-        x += vx;
-        y += vy;
-        pending.push({ t, x: x / AW, y: y / AH });
-      } else {
-        // recuperado: los cuadros predichos cuentan solo si se volvió a encontrar
-        arr.push(...pending);
-        pending.length = 0;
-        misses = 0;
-        vx = vx * 0.3 + (m.x - x) * 0.7;
-        vy = vy * 0.3 + (m.y - y) * 0.7;
-        x = m.x;
-        y = m.y;
-        if (m.s > ADAPT_SCORE) {
-          const np = patch(f, x, y);
-          for (let i = 0; i < tpl.length; i++) tpl[i] = tpl[i] * 0.65 + np[i] * 0.35;
+        const base = warp ? norm(patchWarp(f0, seeds[k].x, seeds[k].y, warp.rot, warp.sc)) : bases[k].n;
+        const m = match(f, [base, norm(p.tpl)], px, py);
+        // tras cuadros perdidos se exige más confianza para no "recuperar" otra cosa
+        if (m.s < (p.misses ? RECOVER_SCORE : MIN_SCORE)) {
+          if (++p.misses > MAX_MISSES) stop = true;
+          p.x = px;
+          p.y = py;
+        } else {
+          p.misses = 0;
+          p.vx = p.vx * 0.3 + (m.x - p.x) * 0.7;
+          p.vy = p.vy * 0.3 + (m.y - p.y) * 0.7;
+          p.x = m.x;
+          p.y = m.y;
+          if (m.s > ADAPT_SCORE) {
+            const np = patch(f, p.x, p.y);
+            for (let i = 0; i < p.tpl.length; i++) p.tpl[i] = p.tpl[i] * 0.65 + np[i] * 0.35;
+          }
         }
-        arr.push({ t, x: x / AW, y: y / AH });
+      }
+      if (stop) {
+        lost = true;
+        break;
+      }
+      // Los cuadros predichos (sin encontrar) cuentan solo si después se vuelven a encontrar todos los puntos
+      if (st.some(p => p.misses)) pending.push(entry(t, st));
+      else {
+        arr.push(...pending, entry(t, st));
+        pending.length = 0;
       }
       done++;
       if (done % 3 === 0) {
@@ -238,12 +283,15 @@ export async function runTrack(c, silent) {
   }
   rebuild();
   const P = c.track.pts;
+  const sm = (a, p, b, k) => (a[k] + p[k] * 2 + b[k]) / 4;
   if (P.length > 4)
     c.track.pts = P.map((p, i) => {
       if (i === 0 || i === P.length - 1) return p;
       const a = P[i - 1],
         b = P[i + 1];
-      return { t: p.t, x: (a.x + p.x * 2 + b.x) / 4, y: (a.y + p.y * 2 + b.y) / 4 };
+      const q = { t: p.t, x: sm(a, p, b, 'x'), y: sm(a, p, b, 'y') };
+      if (p.x2 != null) ((q.x2 = sm(a, p, b, 'x2')), (q.y2 = sm(a, p, b, 'y2')));
+      return q;
     });
   c.track.lost = lost;
   c.track.cancelled = S.trackCancel;
@@ -256,7 +304,7 @@ export async function runTrack(c, silent) {
         ? 'Rastreo detenido'
         : lost
           ? 'Rastreo listo: el objeto se perdió en una parte del clip'
-          : 'Rastreo listo: ' + c.track.pts.length + ' puntos'
+          : 'Rastreo listo: ' + c.track.pts.length + ' muestras' + (c.track.seed2 ? ' · con giro y escala' : '')
     );
     renderPanel();
   }

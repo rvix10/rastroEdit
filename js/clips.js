@@ -179,7 +179,7 @@ export function cloneClip(c) {
     ...c,
     id: nid(),
     trans: { ...c.trans },
-    track: c.track ? { seed: { ...c.track.seed }, pts: c.track.pts.map(p => ({ ...p })) } : null,
+    track: c.track ? JSON.parse(JSON.stringify(c.track)) : null, // incluye el segundo punto (seed2, x2/y2)
     gain: null,
     _lastT: null,
   };

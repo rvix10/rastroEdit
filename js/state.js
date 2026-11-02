@@ -20,6 +20,8 @@ export const S = {
   tab: 'track',
   pps: 70,
   pick: false,
+  pickFirst: null, // rastreo de 2 puntos: primer toque, a la espera del segundo
+  trackPts: 1, // 1 o 2 puntos al marcar
   showPath: true,
   tracking: null,
   trackCancel: false,

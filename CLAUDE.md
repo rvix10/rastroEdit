@@ -14,7 +14,7 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
 - Prueba de humo: `node tests/smoke.cjs` — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
   del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
-  rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
+  rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
@@ -39,9 +39,9 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `clips.js` | Importar videos, `seekTo`, audio (WebAudio), `cloneClip` |
 | `timeline.js` | `layout()` calcula `_start/_len/_d` (los clips se solapan en transiciones) |
 | `transitions.js` | `TR` (transiciones) y `applyFilter` |
-| `render.js` | `renderFrame(T)`: compone clips, transición, overlays y guías |
+| `render.js` | `renderFrame(T)`: compone clips, transición, overlays y guías; `trackAt`, `trackXform`, `ovPos`/`ovSetAbs` |
 | `playback.js` | Bucle `requestAnimationFrame`; al reproducir, el reloj del proyecto sigue al `<video>` activo (`videoClock`) |
-| `tracker.js` | Rastreo 2D por punto (ZNCC, desenfoque, plantilla adaptativa, subpíxel) |
+| `tracker.js` | Rastreo 2D de 1 o 2 puntos (ZNCC, desenfoque, plantilla adaptativa, subpíxel; con 2 puntos, plantilla original deformada con el giro/escala previstos) |
 | `export.js` | Elige cómo exportar: rápida (`fastexport.js`) o, si no hay WebCodecs o falla, `MediaRecorder` en tiempo real (`S.fastBroken`) |
 | `fastexport.js` | Exportación con WebCodecs: cuadro por cuadro (`renderFrame` + `VideoEncoder`), audio mezclado con `OfflineAudioContext` + `AudioEncoder` |
 | `frames.js` | `FrameSource`: cuadro exacto de un video con `VideoDecoder` (decodifica en orden); `drawRotated()` |
@@ -72,6 +72,10 @@ python3 -m http.server 8080   # abrir http://localhost:8080
   Si cambias cómo se mezcla el audio en `syncMedia()`, cambia también `mixAudio()`.
 - Coordenadas: el rastreo guarda `x,y` normalizados (0–1) **en el espacio del video fuente**; `mapSrc()` los lleva al lienzo.
   Overlays con `follow:true` guardan `x,y` como **desplazamiento** respecto al punto rastreado (normalizado al lienzo).
+- Rastreo de 2 puntos: `track.seed2 = {x,y}` (mismo `t` que `seed`) y cada muestra lleva además `x2,y2`. `trackXform(c, local)`
+  da ancla (punto 1), giro y escala respecto del cuadro de la semilla. Con 2 puntos, el desplazamiento del overlay está en
+  ese cuadro de referencia y también gira/escala (`followRot`/`followScale`, por defecto activos). Para mover un overlay
+  usa `ovSetAbs()` (inverso de `ovPos()`), nunca sumes deltas a `o.x/o.y` a mano; `setFollow()` cambia opciones sin saltos.
 - UI con `data-act="accion:arg"`, `data-tab`, `data-k` (inputs). No usar `alert/confirm/prompt`: confirmaciones dentro de la página.
 - Textos de la interfaz en español, directos, desde el lado del usuario. Toast tras acciones ("Clip dividido", "Proyecto eliminado").
 - Colores siempre desde los tokens de `:root` en `css/styles.css`. Debe funcionar a 390 px de ancho sin scroll horizontal.
@@ -79,7 +83,8 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 
 ## Pendiente (en orden propuesto)
 
-1. Tracking de 2 puntos: posición + rotación + escala; overlays que hereden rotación/escala.
-2. Tracking planar de 4 esquinas (homografía) para reemplazar pantallas/letreros en perspectiva.
-3. Pista de música y volumen por clip.
-4. Arrastrar clips para reordenar y recortar desde los bordes en la línea de tiempo.
+1. Tracking planar de 4 esquinas (homografía) para reemplazar pantallas/letreros en perspectiva.
+2. Pista de música y volumen por clip.
+3. Arrastrar clips para reordenar y recortar desde los bordes en la línea de tiempo.
+4. Rastreo más rápido: leer los cuadros con `FrameSource` (frames.js) en vez de seek en `<video>` (hoy cada seek decodifica
+   desde el keyframe anterior; con GOP largo, 4 s de video tardan ~20 s en analizarse).
