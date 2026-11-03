@@ -21,6 +21,8 @@ Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 | **Deshacer / rehacer** | Hasta 60 pasos. Botones en la barra superior, o `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`). `Ctrl+S` fuerza el guardado. |
 | **Teclado y accesibilidad** | Atajos: `Espacio` reproducir, `←`/`→` un cuadro (con `Shift`, 1 s), `Inicio`/`Fin`, `S` dividir, `Supr` eliminar clip (con «Deshacer» en el aviso). Todo se alcanza con `Tab`; los avisos se anuncian a lectores de pantalla; contraste AA. |
 | **Primer uso** | Proyecto de ejemplo con una bienvenida que explica qué mirar y un botón para empezar el propio. |
+| **App instalable** | Se instala como app (ícono, pantalla completa) desde Proyectos → Este dispositivo, o desde el menú del navegador. Funciona **sin conexión**. |
+| **Diagnóstico** | Proyectos → Este dispositivo: núcleos, GPU, qué códecs abre y exporta (y si por hardware) y una medición en «× tiempo real». El informe se copia para compartirlo. |
 | **Exportar** | MP4 en **720p, 1080p o 4K** y calidad Ligera, Normal o Alta (muestra el peso máximo), armado cuadro por cuadro con WebCodecs (H.264 o VP9, audio AAC u Opus): no depende de reproducir en tiempo real, cada cuadro es exacto y el texto se dibuja a la resolución de salida. El video se escribe en el disco a medida que se codifica. En navegadores sin WebCodecs, graba el lienzo con `MediaRecorder` en tiempo real. Si cambias de pestaña, se pausa y sigue al volver. |
 
 ## Cómo correrlo
@@ -35,10 +37,13 @@ npx serve .
 
 Abre `http://localhost:8080`.
 
-### Probar en el celular
+### Probar en el celular o la tablet
 
 Publícalo con GitHub Pages: **Settings → Pages → Deploy from a branch → `main` / root**.
-Queda en `https://<usuario>.github.io/rastroEdit/`.
+Queda en `https://<usuario>.github.io/rastroEdit/` (HTTPS, necesario para instalarla y para que funcione sin conexión).
+
+En Android, Chrome ofrece **Instalar app**; también aparece el botón en Proyectos → Este dispositivo.
+Ahí mismo, **Medir rendimiento** muestra qué tan rápido exporta y rastrea ese equipo.
 
 ## Estructura
 
@@ -70,6 +75,10 @@ js/
   store.js        acceso a IndexedDB (proyectos, videos, preferencias)
   project.js      serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer, archivo .rastro
   archive.js      zip mínimo (sin dependencias) para los archivos .rastro
+  pwa.js          app instalable (registra sw.js, botón Instalar)
+  diag.js         diagnóstico del dispositivo y medición de rendimiento
+sw.js             service worker: funciona sin conexión
+manifest.webmanifest, icons/   app instalable
 tests/smoke.cjs   prueba de humo en Chromium (Playwright)
 ```
 

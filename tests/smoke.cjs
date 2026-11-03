@@ -1,6 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
 //   node tests/smoke.cjs                 todo
-//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, acceso, 2puntos, rotacion, demux)
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -16,6 +16,9 @@ const TYPES = {
   '.css': 'text/css',
   '.webm': 'video/webm',
   '.mp4': 'video/mp4',
+  '.webmanifest': 'application/manifest+json',
+  '.png': 'image/png',
+  '.ogg': 'audio/ogg',
 };
 
 // Video de 4 s con un objeto cuyo centro es x = 110+240t, y = 330+120·sin 2t (en 1280×720)
@@ -1359,6 +1362,118 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     );
     check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
     await page.close();
+  }
+
+  // App instalable (PWA), sin conexión y diagnóstico del dispositivo
+  if (run('pwa')) {
+    console.log('\nApp instalable, sin conexión y diagnóstico');
+    // Manifiesto e íconos
+    const man = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
+    const pngSize = f => {
+      const b = fs.readFileSync(path.join(ROOT, f));
+      return b.readUInt32BE(16) + 'x' + b.readUInt32BE(20);
+    };
+    const iconsOk = man.icons.every(i => fs.existsSync(path.join(ROOT, i.src)) && pngSize(i.src) === i.sizes);
+    check(
+      man.name &&
+        man.start_url &&
+        man.display === 'standalone' &&
+        iconsOk &&
+        man.icons.some(i => i.purpose === 'maskable') &&
+        man.icons.some(i => i.sizes === '512x512'),
+      'manifiesto válido: nombre, inicio, pantalla completa e íconos (192, 512 y maskable) con su tamaño real'
+    );
+    // El service worker precarga todos los archivos de la app
+    const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+    const appFiles = [
+      ...fs.readdirSync(path.join(ROOT, 'js')).map(f => 'js/' + f),
+      'css/styles.css',
+      'index.html',
+      'manifest.webmanifest',
+      ...man.icons.map(i => i.src),
+    ];
+    const missing = appFiles.filter(f => !swSrc.includes(`'${f}'`));
+    check(
+      !missing.length,
+      'sw.js precarga todos los archivos de la app' + (missing.length ? ': faltan ' + missing.join(', ') : '')
+    );
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 820 } });
+    const page = await ctx.newPage();
+    const errs = [];
+    page.on('pageerror', e => errs.push(e.message));
+    page.on('console', m => m.type() === 'error' && errs.push(m.text()));
+    await page.goto(url);
+    await until(page, async () => {
+      const { S } = await import('/js/state.js');
+      return S.clips.length === 3 && !S.tracking;
+    });
+    const ctl =
+      (await until(page, () => !!navigator.serviceWorker.controller || !!window.__swReady, null, 3000)) ||
+      (await page.reload(), await until(page, () => !!navigator.serviceWorker.controller, null, 10000));
+    check(ctl, 'el service worker queda activo y controla la página');
+    // Sin conexión: recargar sigue funcionando (la app, sus módulos y el proyecto guardado)
+    await ctx.setOffline(true);
+    await page.reload();
+    const off = await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        return S.clips.length >= 3 && !!document.querySelector('#tabs .tab');
+      },
+      null,
+      15000
+    );
+    check(off, 'sin conexión, la app carga igual (con el proyecto guardado)');
+    await ctx.setOffline(false);
+    // Diagnóstico y medición
+    await page.click('[data-tab="projects"]');
+    await page.click('[data-act="diagRun"]');
+    await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        return S.diag && S.diag.info && !S.diag.running;
+      },
+      null,
+      20000
+    );
+    const d1 = await page.evaluate(async () => {
+      const { S } = await import('/js/state.js');
+      return {
+        info: S.diag.info,
+        codecs: S.diag.codecs,
+        rows: document.querySelectorAll('table.diag tbody tr').length,
+      };
+    });
+    check(
+      d1.info.cores > 0 && d1.rows >= 6 && d1.codecs.video.find(v => /H\.264 1080p/.test(v.n)).dec,
+      `diagnóstico: ${d1.info.cores} núcleos, GPU «${(d1.info.gpu || '?').slice(0, 30)}», ${d1.rows} códecs revisados`
+    );
+    await page.click('[data-act="benchRun"]');
+    await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        return S.diag && S.diag.bench && !S.diag.running;
+      },
+      null,
+      180000
+    );
+    const bench = await page.evaluate(async () => (await import('/js/state.js')).S.diag.bench);
+    check(
+      bench.length >= 3 && bench.every(r => /tiempo real/.test(r.v)),
+      'medición de rendimiento: ' + bench.map(r => `${r.n} ${r.v.split(' · ')[0]}`).join(' · ')
+    );
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.click('[data-act="diagCopy"]');
+    await page.waitForTimeout(200);
+    const txt = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+    check(
+      /diagnóstico del dispositivo/.test(txt) && /Códecs de video/.test(txt) && /Rendimiento/.test(txt),
+      'el informe se copia para compartirlo'
+    );
+    check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
+    await ctx.close();
   }
 
   const extra = ensureExtra();

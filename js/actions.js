@@ -10,6 +10,8 @@ import { renderTabs, setTab, renderPanel, markWelcome } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
 import { zoomAt } from './timeline-touch.js';
 import { importMusic, attachMusic, MUSIC_ACCEPT } from './music.js';
+import { promptInstall } from './pwa.js';
+import { deviceInfo, codecSupport, benchmark, reportText } from './diag.js';
 import {
   P,
   commit,
@@ -28,6 +30,29 @@ import {
 } from './project.js';
 
 /* ---------- acciones ---------- */
+/** Diagnóstico del dispositivo (Proyectos → Este dispositivo). Con bench, también mide el rendimiento. */
+async function runDiag(bench) {
+  if (S.diag && S.diag.running) return;
+  if (bench && (S.exporting || S.tracking))
+    return toast('Espera a que termine ' + (S.exporting ? 'la exportación' : 'el rastreo'));
+  const prev = S.diag || {};
+  S.diag = { ...prev, running: true, step: 'Revisando el dispositivo…', p: 0 };
+  renderPanel();
+  try {
+    const info = await deviceInfo(),
+      codecs = await codecSupport();
+    S.diag = { ...S.diag, info, codecs };
+    if (bench)
+      S.diag.bench = await benchmark((step, p) => {
+        Object.assign(S.diag, { step, p });
+        if (S.tab === 'projects') renderPanel();
+      });
+  } catch (e) {
+    toast('No se pudo completar el diagnóstico');
+  }
+  S.diag.running = false;
+  if (S.tab === 'projects') renderPanel();
+}
 const UNDO = { label: 'Deshacer', act: 'undo' };
 export function selClip(id) {
   S.sel = id;
@@ -377,6 +402,29 @@ export function act(a, el) {
         }, 4000);
       }
       break;
+    case 'install':
+      promptInstall();
+      break;
+    case 'diagRun':
+    case 'benchRun':
+      runDiag(k === 'benchRun');
+      break;
+    case 'diagCopy': {
+      const d = S.diag || {},
+        txt = reportText(d.info, d.codecs, d.bench),
+        msg = ok => {
+          const m = $('#diagMsg');
+          if (m) m.textContent = ok ? 'Informe copiado.' : 'No se pudo copiar: selecciona el texto del informe a mano.';
+        };
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(txt).then(
+          () => msg(true),
+          () => msg(false)
+        );
+      else msg(false);
+      S.diag.text = txt;
+      break;
+    }
     case 'welcomeOk':
       markWelcome();
       renderPanel();

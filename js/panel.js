@@ -5,6 +5,7 @@ import { exportInfo, cancelExport } from './export.js';
 import { RESOLUTIONS, QUALITIES } from './fastexport.js';
 import { act } from './actions.js';
 import { P, refreshList } from './project.js';
+import { isStandalone, onPwaChange } from './pwa.js';
 
 /* ---------- UI: pestañas ---------- */
 export const TABS = [
@@ -337,7 +338,7 @@ function musicPanel() {
 export function projectsPanel() {
   const cur = P.project;
   if (!P.ok)
-    return `<h2>Proyectos</h2><p class="stat warn">Este navegador no permite guardar datos (por ejemplo, en una ventana privada). Puedes editar y exportar, pero el proyecto se pierde al cerrar la página.</p>${fileBlock()}`;
+    return `<h2>Proyectos</h2><p class="stat warn">Este navegador no permite guardar datos (por ejemplo, en una ventana privada). Puedes editar y exportar, pero el proyecto se pierde al cerrar la página.</p>${fileBlock()}${deviceBlock()}`;
   const st =
     {
       saved: 'Todos los cambios están guardados en este navegador.',
@@ -369,7 +370,50 @@ export function projectsPanel() {
     ${P.list.length ? `<ul class="clist plist">${list}</ul>` : '<p class="empty">Cargando…</p>'}
     ${sto}
     <p class="note">Los proyectos y sus videos se guardan solo en este navegador y este dispositivo.</p>
-    ${fileBlock()}`;
+    ${fileBlock()}
+    ${deviceBlock()}`;
+}
+// Este dispositivo: instalar la app y diagnóstico (diag.js)
+onPwaChange(() => S.tab === 'projects' && renderPanel());
+function deviceBlock() {
+  const d = S.diag || {},
+    pwa = S.pwa || {};
+  const install = isStandalone()
+    ? '<p class="note">Abierta como app instalada. Funciona sin conexión.</p>'
+    : pwa.prompt
+      ? '<button class="primary" data-act="install">Instalar app</button><p class="note">Queda como una app más: ícono, pantalla completa y funciona sin conexión.</p>'
+      : '<p class="note">Para instalarla como app: en el menú del navegador, «Instalar app» o «Agregar a la pantalla principal».</p>';
+  const yn = v =>
+    v === 'hardware'
+      ? '<b class="ok">sí</b> · hardware'
+      : v === 'software'
+        ? 'sí · software'
+        : v
+          ? 'sí'
+          : '<span class="no">no</span>';
+  let res = '';
+  if (d.info) {
+    const i = d.info;
+    res += `<dl class="specs"><dt>Navegador</dt><dd>${esc(i.browser)} · ${esc(i.platform)}</dd><dt>Núcleos</dt><dd>${i.cores || '?'}</dd><dt>Memoria</dt><dd>${i.memory ? i.memory + ' GB o más' : '?'}</dd><dt>GPU</dt><dd>${esc(i.gpu || '?')}</dd><dt>Sin conexión</dt><dd>${i.offline ? 'sí' : 'no'}</dd></dl>`;
+  }
+  if (d.codecs && d.codecs.video.length)
+    res += `<table class="diag"><caption class="sr-only">Códecs de video</caption><thead><tr><th scope="col">Video</th><th scope="col">Abrir</th><th scope="col">Exportar</th></tr></thead><tbody>${d.codecs.video
+      .map(v => `<tr><th scope="row">${v.n}</th><td>${yn(v.dec)}</td><td>${yn(v.enc)}</td></tr>`)
+      .join(
+        ''
+      )}</tbody></table><p class="note">Audio para exportar: ${d.codecs.audio.map(a => `${a.n} ${a.enc ? 'sí' : 'no'}`).join(' · ')}</p>`;
+  if (d.bench)
+    res += `<dl class="specs bench">${d.bench.map(r => `<dt>${esc(r.n)}</dt><dd>${esc(r.v)}</dd>`).join('')}</dl>`;
+  const busy = d.running;
+  return `<div class="lbl">Este dispositivo</div>
+    ${install}
+    ${
+      busy
+        ? `<p class="note" aria-live="polite">${esc(d.step || 'Midiendo…')}</p><div class="prog"><i style="width:${(d.p || 0) * 100}%"></i></div>`
+        : `<div class="grid2"><button data-act="diagRun">${d.info ? 'Volver a revisar' : 'Diagnóstico'}</button><button data-act="benchRun">Medir rendimiento</button></div>`
+    }
+    ${res}
+    ${d.info && !busy ? '<button data-act="diagCopy">Copiar informe</button><p class="note" id="diagMsg">Puedes pegar el informe en un mensaje para compartir qué puede hacer este equipo.</p>' : ''}`;
 }
 // Archivo .rastro: el proyecto con sus videos, para abrirlo en otro equipo
 function fileBlock() {
