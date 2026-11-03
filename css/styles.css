@@ -167,7 +167,7 @@ label:focus-within {
   .app {
     height: 100%;
     grid-template-columns: 72px 340px minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr) 214px;
+    grid-template-rows: auto minmax(0, 1fr) var(--tl-h, 214px); /* --tl-h: la barra de la vista previa (viewer.js) */
     grid-template-areas: 'head head head' 'tabs panel stage' 'tl tl tl';
     padding-block: 0 12px;
   }
@@ -784,19 +784,56 @@ textarea {
   overflow: hidden;
   padding: 10px;
 }
+/* El tamaño del lienzo lo calcula viewer.js (fitStage) según el lugar y la proporción del proyecto */
 #stage {
   display: block;
   max-width: 100%;
-  max-height: 52vh;
   width: auto;
   height: auto;
   touch-action: none;
   background: #000;
   border-radius: 8px;
 }
-@media (min-width: 900px) {
-  #stage {
-    max-height: 100%;
+.viewer.fill {
+  contain: size; /* en PC/tablet horizontal llena su celda: el lienzo no la agranda */
+}
+/* Barra para cambiar el tamaño de la vista previa (arrastrar; doble toque o Enter: tamaño normal) */
+.pv-grip {
+  position: relative;
+  flex: none;
+  height: 12px;
+  margin-top: -4px;
+  display: grid;
+  place-items: center;
+  cursor: ns-resize;
+  touch-action: none;
+  border-radius: 6px;
+}
+.pv-grip span {
+  width: 48px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--muted);
+}
+.pv-grip:hover span,
+.pv-grip.on span {
+  background: var(--accent);
+  width: 64px;
+}
+.pv-grip:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 0;
+}
+@media (pointer: coarse) {
+  /* se ve fina, pero se toca en 44 px de alto (sobre el espacio libre del centro) */
+  .pv-grip::before {
+    content: '';
+    position: absolute;
+    left: 38%;
+    right: 25%;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
   }
 }
 .pickhint {
@@ -1546,7 +1583,7 @@ kbd {
 }
 @media (pointer: coarse) and (min-width: 900px) {
   .app {
-    grid-template-rows: auto minmax(0, 1fr) 230px; /* el encabezado de la línea de tiempo es más alto */
+    grid-template-rows: auto minmax(0, 1fr) var(--tl-h, 230px); /* el encabezado de la línea de tiempo es más alto */
   }
 }
 
@@ -1563,9 +1600,6 @@ kbd {
     min-height: 0;
     grid-template-rows: auto auto auto auto minmax(0, 1fr);
     padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
-  }
-  #stage {
-    max-height: 34dvh;
   }
   .tl-scroll {
     min-height: 0;
@@ -1596,9 +1630,6 @@ kbd {
     margin-top: -10px; /* el fondo cubre el hueco de la grilla: lo que pasa por debajo no se ve */
     padding-top: 10px;
     padding-bottom: 6px;
-  }
-  #stage {
-    max-height: 30dvh;
   }
   .panel {
     scroll-margin-top: 8px;

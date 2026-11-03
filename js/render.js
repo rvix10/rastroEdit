@@ -1,4 +1,4 @@
-import { $, ctx, S, L1, L2 } from './state.js';
+import { $, cv, ctx, S, L1, L2 } from './state.js';
 import { clamp, ease, easeOutBack, roundRect, getSel, getOv } from './util.js';
 import { coverOf, mapSrc } from './clips.js';
 import { activeAt, localOf } from './timeline.js';
@@ -336,6 +336,23 @@ export function renderFrame(T) {
   }
   if (!S.exporting) drawGuides(T, act);
 }
+/**
+ * Puntos marcados que se ven (y se pueden arrastrar) en `local`: los que se están tocando (pendientes) o los de la
+ * semilla. Con 4 esquinas ya rastreadas, solo en el cuadro de la semilla (o si se movieron y falta volver a rastrear).
+ * Devuelve { pts (objetos {x,y} normalizados, se modifican al arrastrar), quad, pending }.
+ */
+export function editableMarks(c, local) {
+  const tr = c.track,
+    pq = S.pickQuad && S.pickQuad.clipId === c.id ? S.pickQuad.pts : null;
+  if (pq) return { pts: pq, quad: true, pending: true };
+  if (S.pickFirst && S.pickFirst.clipId === c.id) return { pts: [S.pickFirst], pending: true };
+  if (!tr || !tr.seed) return { pts: [] };
+  if (tr.quad) {
+    const show = tr.pts.length < 2 || tr.stale || Math.abs(local - tr.seed.t) < 0.04;
+    return { pts: show ? tr.quad : [], quad: true };
+  }
+  return { pts: [tr.seed, tr.seed2].filter(Boolean) };
+}
 export function drawGuides(T, act) {
   const o = getOv();
   const hit = o && S.hits.find(h => h.o === o);
@@ -409,18 +426,10 @@ export function drawGuides(T, act) {
     ctx.restore();
   }
   // Puntos marcados (y el primero mientras se espera el segundo; con 4 esquinas, las que ya se tocaron)
-  const pq = S.pickQuad && S.pickQuad.clipId === c.id ? S.pickQuad.pts : null,
-    tq = c.track && c.track.quad;
-  const marks = pq
-    ? pq
-    : S.pickFirst && S.pickFirst.clipId === c.id
-      ? [S.pickFirst]
-      : tq
-        ? c.track.pts.length > 1
-          ? []
-          : tq
-        : [c.track && c.track.seed, c.track && c.track.seed2].filter(Boolean);
-  if ((pq && pq.length > 1) || (tq && !pq && marks.length === 4)) {
+  const em = editableMarks(c, local),
+    marks = em.pts,
+    md = S.markDrag && S.markDrag.c === c ? S.markDrag : null;
+  if (em.quad && marks.length > 1) {
     // contorno de las esquinas marcadas
     ctx.save();
     ctx.strokeStyle = '#ffd84d';
@@ -453,7 +462,64 @@ export function drawGuides(T, act) {
     ctx.moveTo(m.x, m.y + r * 0.6);
     ctx.lineTo(m.x, m.y + r * 1.8);
     ctx.stroke();
-    if (marks.length > 1 || S.pickFirst || pq) ctx.fillText(String(i + 1), m.x + r * 0.9, m.y - r * 0.9);
+    if (md && md.pt === s) {
+      // el que se está arrastrando
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, r * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (marks.length > 1 || em.pending) ctx.fillText(String(i + 1), m.x + r * 0.9, m.y - r * 0.9);
   });
+  ctx.restore();
+  if (md) drawLoupe(c, md.pt, c === act[0] ? L1 : L2);
+}
+/** Lupa ×3 en una esquina mientras se arrastra un punto (con el dedo encima no se ve dónde queda). */
+function drawLoupe(c, pt, L) {
+  // ~120 px en pantalla, sea cual sea el tamaño de la vista previa (máx. la mitad del cuadro)
+  const k = S.W / (cv.getBoundingClientRect().width || S.W),
+    m = mapSrc(c, pt.x, pt.y),
+    size = Math.round(Math.min(120 * k, Math.min(S.W, S.H) * 0.5)),
+    pad = Math.round(Math.min(S.W, S.H) * 0.03),
+    src = size / 3,
+    x0 = m.x > S.W / 2 ? pad : S.W - size - pad,
+    y0 = m.y > S.H / 2 ? pad : S.H - size - pad,
+    lw = Math.max(2, S.H * 0.004);
+  ctx.save();
+  roundRect(ctx, x0, y0, size, size, size * 0.08);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(L, m.x - src / 2, m.y - src / 2, src, src, x0, y0, size, size);
+  ctx.restore();
+  // retícula: contorno oscuro y línea limón, para verse sobre cualquier fondo
+  const cx = x0 + size / 2,
+    cy = y0 + size / 2,
+    a = size * 0.12;
+  for (const [col, w] of [
+    ['rgba(8,9,12,.8)', lw * 2.6],
+    ['#ffd84d', lw],
+  ]) {
+    ctx.strokeStyle = col;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.moveTo(cx - a, cy);
+    ctx.lineTo(cx - a * 0.3, cy);
+    ctx.moveTo(cx + a * 0.3, cy);
+    ctx.lineTo(cx + a, cy);
+    ctx.moveTo(cx, cy - a);
+    ctx.lineTo(cx, cy - a * 0.3);
+    ctx.moveTo(cx, cy + a * 0.3);
+    ctx.lineTo(cx, cy + a);
+    ctx.stroke();
+  }
+  roundRect(ctx, x0, y0, size, size, size * 0.08);
+  ctx.strokeStyle = '#121212';
+  ctx.lineWidth = lw * 2;
+  ctx.stroke();
+  ctx.strokeStyle = '#ffd84d';
+  ctx.lineWidth = lw;
+  ctx.stroke();
   ctx.restore();
 }

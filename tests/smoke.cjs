@@ -1,6 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
 //   node tests/smoke.cjs                 todo
-//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, 4esquinas, rotacion, demux)
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, 4esquinas, vista, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -126,9 +126,137 @@ function ensureExtra() {
     '-b:v',
     '4M',
   ]);
+  // El mismo plano, pero antes de 1,5 s está achicado a 0,55 y corrido: un salto que no se puede seguir (tramo sin rastrear)
+  run('planar-jump.webm', [
+    '-f',
+    'lavfi',
+    '-i',
+    "nullsrc=s=160x90:r=30,geq=lum='128+90*(random(1)-0.5)':cb=128:cr=128,scale=1280:720:flags=bicubic",
+    '-f',
+    'lavfi',
+    '-i',
+    "nullsrc=s=640x360:r=30,geq=lum='128+60*(random(2)-0.5)':cb=128:cr=128,scale=1280:720:flags=bicubic",
+    '-filter_complex',
+    '[0:v][1:v]blend=all_mode=overlay,eq=contrast=1.3,colorchannelmixer=rr=0.55:gg=0.42:bb=0.3,' +
+      'drawbox=x=360:y=200:w=560:h=340:color=white@0.8:t=5,trim=end_frame=1,loop=loop=119:size=1:start=0,' +
+      "setpts=N/30/TB,perspective=x0='100+30*in/30+lt(in,45)*(348-0.45*(100+30*in/30))':" +
+      "y0='60+40*in/30+lt(in,45)*(202-0.45*(60+40*in/30))':" +
+      "x1='1180-50*in/30+lt(in,45)*(348-0.45*(1180-50*in/30))':" +
+      "y1='40+60*in/30+lt(in,45)*(202-0.45*(40+60*in/30))':" +
+      "x2='60+20*in/30+lt(in,45)*(348-0.45*(60+20*in/30))':" +
+      "y2='680-20*in/30+lt(in,45)*(202-0.45*(680-20*in/30))':" +
+      "x3='1220-30*in/30+lt(in,45)*(348-0.45*(1220-30*in/30))':" +
+      "y3='700-40*in/30+lt(in,45)*(202-0.45*(700-40*in/30))':" +
+      'sense=destination:eval=frame,format=yuv420p[v]',
+    '-map',
+    '[v]',
+    '-r',
+    '30',
+    '-c:v',
+    'libvpx',
+    '-b:v',
+    '4M',
+  ]);
   // Video de celular girado: solo se marca la rotación (sin recodificar)
   if (out['vp9.mp4']) run('rot90.mp4', ['-display_rotation', '90', '-i', out['vp9.mp4'], '-c', 'copy']);
   return out;
+}
+// Plano que tiembla fuerte (como un video a mano o con viento), dibujado aquí con una perspectiva exacta:
+// la textura de planar.webm va a las esquinas SHAKE_CORNERS(t). Devuelve la ruta (o null si no hay ffmpeg/planar.webm).
+const SHAKE_CORNERS = t => {
+  const a = 50 * Math.sin(t * 25),
+    b = 40 * Math.cos(t * 21);
+  return [
+    [100 + 30 * t + a, 60 + 40 * t + b],
+    [1180 - 50 * t + a, 40 + 60 * t + b],
+    [60 + 20 * t + a, 680 - 20 * t + b],
+    [1220 - 30 * t + a, 700 - 40 * t + b],
+  ];
+};
+async function ensureShake(planarWebm) {
+  const out = path.join(__dirname, 'fixtures', 'planar-shake.webm');
+  if (fs.existsSync(out)) return out;
+  if (!planarWebm) return null;
+  const { spawn } = require('child_process');
+  const pl = await import(require('url').pathToFileURL(path.join(ROOT, 'js', 'planar.js')));
+  const W = 1280,
+    H = 720;
+  // Textura: el primer cuadro de planar.webm sin deformar no existe; se regenera igual que allí
+  const tex = execFileSync(
+    'ffmpeg',
+    [
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      "nullsrc=s=160x90:r=30,geq=lum='128+90*(random(1)-0.5)':cb=128:cr=128,scale=1280:720:flags=bicubic",
+      '-f',
+      'lavfi',
+      '-i',
+      "nullsrc=s=640x360:r=30,geq=lum='128+60*(random(2)-0.5)':cb=128:cr=128,scale=1280:720:flags=bicubic",
+      '-filter_complex',
+      '[0:v][1:v]blend=all_mode=overlay,eq=contrast=1.3,colorchannelmixer=rr=0.55:gg=0.42:bb=0.3,' +
+        'drawbox=x=360:y=200:w=560:h=340:color=white@0.8:t=5',
+      '-frames:v',
+      '1',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgb24',
+      '-',
+    ],
+    { maxBuffer: 1 << 26 }
+  );
+  const enc = spawn(
+    'ffmpeg',
+    [
+      '-loglevel',
+      'error',
+      '-y',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgb24',
+      '-s',
+      `${W}x${H}`,
+      '-r',
+      '30',
+      '-i',
+      '-',
+    ].concat(['-c:v', 'libvpx', '-b:v', '4M', out]),
+    { stdio: ['pipe', 'ignore', 'inherit'] }
+  );
+  const buf = Buffer.alloc(W * H * 3);
+  for (let k = 0; k < 120; k++) {
+    // imagen → textura (inversa de textura → imagen)
+    const hi = pl.hInv(
+      pl.hFit(
+        [
+          [0, 0],
+          [W, 0],
+          [0, H],
+          [W, H],
+        ],
+        SHAKE_CORNERS(k / 30)
+      )
+    );
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const [u, v] = pl.hApply(hi, x + 0.5, y + 0.5),
+          o = (y * W + x) * 3;
+        const uu = Math.min(W - 1, Math.max(0, Math.floor(u))),
+          vv = Math.min(H - 1, Math.max(0, Math.floor(v))),
+          i = (vv * W + uu) * 3;
+        buf[o] = tex[i];
+        buf[o + 1] = tex[i + 1];
+        buf[o + 2] = tex[i + 2];
+      }
+    if (!enc.stdin.write(buf)) await new Promise(r => enc.stdin.once('drain', r));
+  }
+  enc.stdin.end();
+  await new Promise(r => enc.on('close', r));
+  return fs.existsSync(out) ? out : null;
 }
 const ffprobePackets = f =>
   execFileSync('ffprobe', [
@@ -644,6 +772,145 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     const hb = await pc.evaluate(() => document.querySelector('#bUndo').getBoundingClientRect().height);
     check(hb < 40, `PC con mouse: diseño compacto (deshacer mide ${Math.round(hb)} px)`);
     await pc.close();
+  }
+
+  // Vista previa: cabe en su lugar con cada proporción y cada pantalla; la barra cambia su tamaño y se recuerda
+  if (run('vista')) {
+    console.log('\nVista previa (tamaño según el dispositivo)');
+    const fit = async page =>
+      page.evaluate(async () => {
+        const ac = await import('/js/actions.js'),
+          out = [];
+        for (const a of ['16:9', '9:16', '1:1']) {
+          ac.act('aspect:' + a);
+          await new Promise(r => setTimeout(r, 120));
+          const c = document.querySelector('#stage').getBoundingClientRect(),
+            v = document.querySelector('.viewer').getBoundingClientRect(),
+            [x, y] = a.split(':').map(Number);
+          const inside =
+            c.left >= v.left - 1 && c.right <= v.right + 1 && c.top >= v.top - 1 && c.bottom <= v.bottom + 1;
+          const ratio = Math.abs(c.width / c.height / (x / y) - 1) < 0.02;
+          out.push({ a, inside, ratio, w: Math.round(c.width), h: Math.round(c.height) });
+        }
+        ac.act('aspect:16:9');
+        return { out, ih: innerHeight, sw: document.documentElement.scrollWidth - innerWidth };
+      });
+    for (const [name, w, h, touch] of [
+      ['celular', 390, 700, true],
+      ['tablet vertical', 800, 1280, true],
+      ['celular acostado', 800, 360, true],
+      ['tablet horizontal', 1333, 800, true],
+      ['PC', 1280, 800, false],
+    ]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: touch, isMobile: touch });
+      const page = await ctx.newPage();
+      await page.goto(url);
+      await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+      const r = await fit(page);
+      const bad = r.out.filter(x => !x.inside || !x.ratio);
+      check(
+        !bad.length && r.sw <= 0,
+        `${name}: la vista previa cabe en su lugar en 16:9, 9:16 y 1:1 (${r.out.map(x => `${x.w}×${x.h}`).join(', ')})`
+      );
+      if (name === 'celular') {
+        const tall = r.out.find(x => x.a === '9:16');
+        check(tall.h >= r.ih * 0.4, `celular: un video vertical se ve grande (${tall.h} px de ${r.ih})`);
+      }
+      if (name === 'celular acostado') {
+        const play = await page.$eval('#bPlay', e => e.getBoundingClientRect().bottom <= innerHeight);
+        check(play, 'celular acostado: la vista previa y los controles entran sin desplazar');
+      }
+      if (touch) {
+        const hit = await page.evaluate(() => {
+          const g = document.querySelector('#pvGrip');
+          g.scrollIntoView({ block: 'center' });
+          const b = g.getBoundingClientRect(),
+            x = b.left + b.width / 2;
+          return [-18, 0, 18].every(dy => document.elementFromPoint(x, b.top + b.height / 2 + dy) === g);
+        });
+        check(hit, `${name}: la barra de tamaño se toca en 44 px de alto`);
+      }
+      await ctx.close();
+    }
+    // Arrastrar la barra con el dedo (celular): la vista previa crece, se recuerda al recargar y Enter la restablece
+    {
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 700 }, hasTouch: true, isMobile: true });
+      const page = await ctx.newPage();
+      await page.goto(url);
+      // (el rastreo automático del ejemplo debe terminar: mientras corre no se guarda)
+      await until(page, async () => {
+        const { S } = await import('/js/state.js');
+        return S.clips.length === 3 && !S.tracking;
+      });
+      await page.evaluate(async () => (await import('/js/actions.js')).act('aspect:9:16'));
+      await page.waitForTimeout(150);
+      const ch = () => page.$eval('#stage', e => Math.round(e.getBoundingClientRect().height));
+      const h0 = await ch();
+      const g = await page.$eval('#pvGrip', e => {
+        const b = e.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      const cdp = await ctx.newCDPSession(page);
+      const tp = (type, y) =>
+        cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: g.x, y, id: 1 }] });
+      await tp('touchStart', g.y);
+      for (let k = 1; k <= 8; k++) {
+        await tp('touchMove', g.y + k * 10);
+        await page.waitForTimeout(20);
+      }
+      await tp('touchEnd');
+      await page.waitForTimeout(100);
+      const h1 = await ch();
+      await page.evaluate(async () => (await import('/js/project.js')).saveNow());
+      await page.reload();
+      await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+      await page.waitForTimeout(150);
+      const h2 = await ch();
+      await page.focus('#pvGrip');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(100);
+      const h3 = await ch();
+      check(
+        h1 >= h0 + 40 && Math.abs(h2 - h1) <= 2 && Math.abs(h3 - h0) <= 2,
+        `celular: arrastrar la barra agranda la vista previa (${h0} → ${h1} px), se recuerda (${h2}) y Enter la restablece (${h3})`
+      );
+      await ctx.close();
+    }
+    // PC: arrastrar con el mouse achica la línea de tiempo y agranda la vista previa; con el teclado también
+    {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.goto(url);
+      await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+      await page.evaluate(async () => (await import('/js/actions.js')).act('aspect:9:16'));
+      await page.waitForTimeout(150);
+      const st = () =>
+        page.evaluate(() => ({
+          c: Math.round(document.querySelector('#stage').getBoundingClientRect().height),
+          tl: Math.round(document.querySelector('.tl').getBoundingClientRect().height),
+        }));
+      const a = await st();
+      const g = await page.$eval('#pvGrip', e => {
+        const b = e.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      await page.mouse.move(g.x, g.y);
+      await page.mouse.down();
+      await page.mouse.move(g.x, g.y + 60, { steps: 6 });
+      await page.mouse.up();
+      await page.waitForTimeout(100);
+      const b = await st();
+      await page.focus('#pvGrip');
+      await page.keyboard.press('ArrowUp');
+      await page.keyboard.press('ArrowUp');
+      await page.waitForTimeout(100);
+      const c = await st();
+      check(
+        b.tl <= a.tl - 50 && b.c >= a.c + 50 && c.tl > b.tl && c.c < b.c,
+        `PC: la barra cambia el reparto entre vista previa y línea de tiempo (${a.c} → ${b.c} px; teclado: ${c.c} px)`
+      );
+      await page.evaluate(() => localStorage.removeItem('rastro.pv'));
+      await page.close();
+    }
   }
 
   // Línea de tiempo táctil: gestos con mouse y con dedos reales (eventos táctiles del protocolo de Chrome)
@@ -1647,11 +1914,26 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     });
     const tap = p => page.mouse.click(box.x + (p.x / 1280) * box.w, box.y + (p.y / 720) * box.h);
     await tap(W(-45, -35, 1));
-    await tap(W(40, 30, 1));
+    const p2 = W(40, 30, 1),
+      bad = { x: p2.x + 35, y: p2.y - 25 };
+    await tap(bad);
     const marked = await page.evaluate(
       `(async () => { ${mods} const t = st.S.clips[0].track; return !!(t && t.seed && t.seed2) })()`
     );
     check(marked, 'marca 2 puntos con dos toques en la vista previa');
+    // El punto 2 quedó corrido: se arrastra a su lugar
+    {
+      const s2 = { x: box.x + (bad.x / 1280) * box.w, y: box.y + (bad.y / 720) * box.h },
+        e2 = { x: box.x + (p2.x / 1280) * box.w, y: box.y + (p2.y / 720) * box.h };
+      await page.mouse.move(s2.x, s2.y);
+      await page.mouse.down();
+      await page.mouse.move(e2.x, e2.y, { steps: 6 });
+      await page.mouse.up();
+      const q = await page.evaluate(
+        `(async () => { ${mods} const t = st.S.clips[0].track; return { x: t.seed2.x * 1280, y: t.seed2.y * 720 } })()`
+      );
+      check(Math.hypot(q.x - p2.x, q.y - p2.y) < 2, 'arrastrar el punto 2 lo ajusta antes de rastrear');
+    }
     await page.click('[data-act="track"]');
     await until(
       page,
@@ -1781,13 +2063,37 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       return { x: r.left, y: r.top, w: r.width, h: r.height };
     });
     const at1 = await page.evaluate(`(async () => { ${truthSrc} return truth(1); })()`);
-    // En desorden: el editor las ordena
-    for (const k of [2, 0, 3, 1])
-      await page.mouse.click(box.x + (at1[k][0] / 1280) * box.w, box.y + (at1[k][1] / 720) * box.h);
+    const scr = ([x, y]) => ({ x: box.x + (x / 1280) * box.w, y: box.y + (y / 720) * box.h });
+    // En desorden (el editor las ordena) y la de arriba a la derecha corrida a propósito 40 px
+    const wrong = [at1[1][0] - 40, at1[1][1] + 30];
+    for (const k of [2, 0, 3, 1]) {
+      const q = scr(k === 1 ? wrong : at1[k]);
+      await page.mouse.click(q.x, q.y);
+    }
     const marked = await page.evaluate(
       `(async () => { ${mods} const t = st.S.clips[0].track; return !!(t && t.quad && t.quad.length === 4 && !st.S.pick) })()`
     );
     check(marked, 'marca 4 esquinas con cuatro toques (en cualquier orden)');
+    // Arrastrar la esquina mal puesta hasta su lugar (con lupa mientras se arrastra)
+    {
+      const a = scr(wrong),
+        b = scr(at1[1]);
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 4 });
+      const dragging = await page.evaluate(`(async () => { ${mods} return !!st.S.markDrag })()`);
+      await page.mouse.move(b.x, b.y, { steps: 4 });
+      await page.mouse.up();
+      const r = await page.evaluate(
+        `(async () => { ${mods} const pl = await import('/js/planar.js'), t = st.S.clips[0].track, q = t.quad[1];
+          const [cx, cy] = pl.quadCenter(t.quad.flatMap(p => [p.x, p.y]));
+          return { x: q.x * 1280, y: q.y * 720, center: Math.hypot(cx - t.seed.x, cy - t.seed.y) < 1e-9 } })()`
+      );
+      check(
+        dragging && Math.hypot(r.x - at1[1][0], r.y - at1[1][1]) < 2 && r.center,
+        `arrastrar una esquina marcada la mueve a donde se suelta (error ${Math.hypot(r.x - at1[1][0], r.y - at1[1][1]).toFixed(1)} px)`
+      );
+    }
     const t0 = Date.now();
     await page.click('[data-act="track"]');
     await until(
@@ -1857,6 +2163,36 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       check(diff < 1e-9, 'mismo resultado sin Worker (en el hilo principal)');
       await p2.close();
     }
+    // Mover una esquina después de rastrear: se avisa que hay que volver a rastrear, y al hacerlo se actualiza
+    {
+      await page.click('[data-tab="track"]');
+      await page.evaluate(
+        `(async () => { ${mods} const c = st.S.clips[0]; (await import('/js/playback.js')).seek(c._start + 1); })()`
+      );
+      await page.waitForTimeout(200);
+      const a = scr(at1[3]);
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      await page.mouse.move(a.x + 8, a.y + 6, { steps: 3 });
+      await page.mouse.up();
+      const st1 = await page.evaluate(
+        `(async () => { ${mods} return { stale: !!st.S.clips[0].track.stale, msg: document.querySelector('#trkStat').textContent } })()`
+      );
+      await page.click('[data-act="track"]');
+      await until(
+        page,
+        async () => {
+          const { S } = await import('/js/state.js');
+          return !S.tracking && !S.clips[0].track.stale;
+        },
+        null,
+        120000
+      );
+      check(
+        st1.stale && /Rastrear/.test(st1.msg),
+        'mover una esquina ya rastreada avisa que hay que volver a rastrear, y rastrear lo actualiza'
+      );
+    }
     // Se guarda con el proyecto
     await page.evaluate(`(async () => { ${mods} await pj.saveNow(); })()`);
     await page.reload();
@@ -1879,6 +2215,129 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     check(cleared, 'borrar el rastreo quita el área');
     check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
     await page.close();
+  }
+
+  // 4 esquinas, casos difíciles: temblor fuerte (no debe perderse) y un salto imposible de seguir
+  // (queda un tramo sin rastrear, y se cubre marcando las esquinas otra vez en ese tramo)
+  if (run('4esquinas') && extra['planar.webm']) {
+    const LOT = [
+      [362, 202],
+      [917, 202],
+      [917, 537],
+      [362, 537],
+    ];
+    const open = async file => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+      const errs = [];
+      page.on('pageerror', e => errs.push(e.message));
+      page.on('console', m => m.type() === 'error' && errs.push(m.text()));
+      await page.goto(url);
+      await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+      await page.click('[data-tab="media"]');
+      await page.setInputFiles('#fileIn', file);
+      await until(page, async () => (await import('/js/state.js')).S.clips.some(c => c.kind === 'video'), null, 20000);
+      await page.evaluate(`(async () => { ${mods} ac.act('clearDemo'); })()`);
+      return { page, errs };
+    };
+    // Rastrea desde t con las esquinas verdaderas (cornersSrc: función t => esquinas de la imagen)
+    const trackFrom = (page, cornersSrc, t) =>
+      page.evaluate(
+        `(async () => { ${mods} const pl = await import('/js/planar.js'), tr = await import('/js/tracker.js');
+          const C = ${cornersSrc}, LOT = ${JSON.stringify(LOT)}, c = st.S.clips[0];
+          const h = pl.hFit([[0, 0], [1280, 0], [0, 720], [1280, 720]], C(${t}));
+          const quad = LOT.map(([x, y]) => { const [u, v] = pl.hApply(h, x, y); return { x: u / 1280, y: v / 720 }; });
+          const [cx, cy] = pl.quadCenter(quad.flatMap(q => [q.x, q.y]));
+          c.track = { seed: { t: ${t}, x: cx, y: cy }, quad, pts: [] };
+          const t0 = performance.now(); await tr.runTrack(c); return (performance.now() - t0) / 1000; })()`
+      );
+    const errAt = (page, cornersSrc, times) =>
+      page.evaluate(
+        `(async () => { ${mods} const pl = await import('/js/planar.js'), rd = await import('/js/render.js');
+          const C = ${cornersSrc}, LOT = ${JSON.stringify(LOT)}, c = st.S.clips[0]; let worst = 0;
+          for (const t of ${JSON.stringify(times)}) {
+            const h = pl.hFit([[0, 0], [1280, 0], [0, 720], [1280, 720]], C(t)), tp = rd.trackAt(c, t);
+            LOT.forEach(([x, y], k) => { const [u, v] = pl.hApply(h, x, y); worst = Math.max(worst, Math.hypot(tp.q[k * 2] * 1280 - u, tp.q[k * 2 + 1] * 720 - v)); });
+          }
+          return { worst, gaps: c.track.gaps || [] } })()`
+      );
+    const shake = await ensureShake(extra['planar.webm']);
+    if (shake) {
+      const { page, errs } = await open(shake);
+      const secs = await trackFrom(page, SHAKE_CORNERS.toString(), 2);
+      // muestras: cada 1/15 s; el temblor solo existe en cuadros enteros (1/30 s)
+      const r = await errAt(page, SHAKE_CORNERS.toString(), [0, 0.4, 1, 1.6, 2.4, 3, 3.6, 3.8]);
+      check(
+        !r.gaps.length && r.worst < 8 && !errs.length,
+        `temblor fuerte: no se pierde y sigue al plano (error máx. ${r.worst.toFixed(1)} px, ${secs.toFixed(1)} s)` +
+          (r.gaps.length ? ' · sin rastrear: ' + JSON.stringify(r.gaps) : '') +
+          (errs.length ? ' · ' + errs.join(' | ') : '')
+      );
+      await page.close();
+    }
+    if (extra['planar-jump.webm']) {
+      const JUMP = t => {
+        const C = [
+          [100 + 30 * t, 60 + 40 * t],
+          [1180 - 50 * t, 40 + 60 * t],
+          [60 + 20 * t, 680 - 20 * t],
+          [1220 - 30 * t, 700 - 40 * t],
+        ];
+        // antes de 1,5 s: achicado a 0,55 alrededor del centro y corrido (60, 40)
+        return Math.round(t * 30) < 45 ? C.map(([x, y]) => [0.55 * x + 348, 0.55 * y + 202]) : C;
+      };
+      const { page, errs } = await open(extra['planar-jump.webm']);
+      await page.click('[data-tab="track"]');
+      await trackFrom(page, JUMP.toString(), 3);
+      const before = await page.evaluate(
+        `(async () => { ${mods} (await import('/js/panel.js')).renderPanel(); return { gaps: st.S.clips[0].track.gaps || [], msg: document.querySelector('#trkStat').textContent, btn: !!document.querySelector('[data-act="pickFill"]') } })()`
+      );
+      const g0 = before.gaps[0] || [9, 9];
+      check(
+        g0[0] < 0.1 && g0[1] > 1.2 && g0[1] < 1.8 && /sin rastrear/.test(before.msg) && before.btn,
+        `un salto deja un tramo sin rastrear y el panel lo dice (${before.gaps.map(g => g.join('–')).join(', ')} s)`
+      );
+      // Cubrir el tramo: el botón lleva a un cuadro del tramo y se marcan ahí las 4 esquinas
+      await page.click('[data-act="pickFill"]');
+      await page.waitForTimeout(300);
+      const local = await page.evaluate(
+        `(async () => { ${mods} const tl = await import('/js/timeline.js'); return tl.localOf(st.S.clips[0], st.S.T) })()`
+      );
+      const box = await page.$eval('#stage', e => {
+        const r = e.getBoundingClientRect();
+        return { x: r.left, y: r.top, w: r.width, h: r.height };
+      });
+      const pts = await page.evaluate(
+        `(async () => { const pl = await import('/js/planar.js'); const C = ${JUMP.toString()}, LOT = ${JSON.stringify(LOT)};
+          const h = pl.hFit([[0, 0], [1280, 0], [0, 720], [1280, 720]], C(${local})); return LOT.map(([x, y]) => pl.hApply(h, x, y)); })()`
+      );
+      for (const [x, y] of pts) await page.mouse.click(box.x + (x / 1280) * box.w, box.y + (y / 720) * box.h);
+      await until(
+        page,
+        async () => {
+          const { S } = await import('/js/state.js');
+          return !S.tracking && (S.clips[0].track.keys || []).length === 1;
+        },
+        null,
+        60000
+      );
+      const after = await errAt(page, JUMP.toString(), [0, 0.5, 1, 1.4, 1.6, 2.5, 3.5, 3.9]);
+      check(
+        local > g0[0] && local < g0[1] && !after.gaps.length && after.worst < 6,
+        `cubrir el tramo: marcar las esquinas ahí lo rastrea y se une al resto (error máx. ${after.worst.toFixed(1)} px)` +
+          (after.gaps.length ? ' · sin rastrear: ' + JSON.stringify(after.gaps) : '')
+      );
+      // Rastrear de nuevo todo usa también ese cuadro clave
+      await page.evaluate(
+        `(async () => { ${mods} await (await import('/js/tracker.js')).runTrack(st.S.clips[0]); })()`
+      );
+      const again = await errAt(page, JUMP.toString(), [0.5, 1.4, 3]);
+      check(
+        !again.gaps.length && again.worst < 6 && !errs.length,
+        'al volver a rastrear todo, el cuadro clave extra se usa otra vez' +
+          (errs.length ? ': ' + errs.join(' | ') : '')
+      );
+      await page.close();
+    }
   }
 
   // Rotación de videos de celular: lo que dibuja el decodificador = lo que muestra <video>

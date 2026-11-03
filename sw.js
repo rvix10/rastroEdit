@@ -56,6 +56,7 @@ const APP = [
   'js/tracker.js',
   'js/transitions.js',
   'js/util.js',
+  'js/viewer.js',
 ];
 self.addEventListener('install', e => {
   e.waitUntil(
