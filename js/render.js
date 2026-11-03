@@ -5,6 +5,7 @@ import { activeAt, localOf } from './timeline.js';
 import { TR, applyFilter } from './transitions.js';
 import { act } from './actions.js';
 import { drawRotated } from './frames.js';
+import { quadCenter } from './planar.js';
 
 /* ---------- render ---------- */
 export function sourceOf(c, local) {
@@ -70,7 +71,18 @@ export function trackAt(c, local) {
     r.x2 = a.x2 + (b.x2 - a.x2) * k;
     r.y2 = a.y2 + (b.y2 - a.y2) * k;
   }
+  if (a.q && b.q) {
+    // 4 esquinas: se interpolan las esquinas y el ancla es el cruce de las diagonales
+    r.q = a.q.map((v, i) => v + (b.q[i] - v) * k);
+    [r.x, r.y] = quadCenter(r.q);
+  }
   return r;
+}
+/** Esquinas del plano rastreado en `local`, en el lienzo ([{x,y}×4]), o null. */
+export function quadAt(c, local) {
+  const tp = trackAt(c, local);
+  if (!tp || !tp.q) return null;
+  return [0, 1, 2, 3].map(i => mapSrc(c, tp.q[i * 2], tp.q[i * 2 + 1]));
 }
 
 /** Ángulo (rad) y largo del segmento punto 1 → punto 2, en píxeles del video fuente. */
@@ -88,10 +100,21 @@ export function trackXform(c, local) {
   if (!tp) return null;
   const m = mapSrc(c, tp.x, tp.y),
     r = { x: m.x, y: m.y, rot: 0, scale: 1, two: false };
-  const s0 = c.track.seed2 && { ...c.track.seed, x2: c.track.seed2.x, y2: c.track.seed2.y };
-  if (s0 && tp.x2 != null) {
+  // Con 4 esquinas, giro y escala salen del segmento que une los centros de los lados izquierdo y derecho
+  const mids = q => ({ x: (q[0] + q[6]) / 2, y: (q[1] + q[7]) / 2, x2: (q[2] + q[4]) / 2, y2: (q[3] + q[5]) / 2 });
+  const qd = c.track.quad;
+  let s0 = null,
+    s1 = null;
+  if (qd && tp.q) {
+    s0 = mids(qd.flatMap(p => [p.x, p.y]));
+    s1 = mids(tp.q);
+  } else if (c.track.seed2 && tp.x2 != null) {
+    s0 = { ...c.track.seed, x2: c.track.seed2.x, y2: c.track.seed2.y };
+    s1 = tp;
+  }
+  if (s0) {
     const a = seg(c, s0),
-      b = seg(c, tp);
+      b = seg(c, s1);
     if (a.len > 1e-6) {
       r.rot = b.ang - a.ang;
       r.scale = b.len / a.len;
@@ -161,6 +184,17 @@ export function drawOverlay(g, o, pos, alpha, age, local) {
   } else if (o.anim === 'fade' && age < 0.45) a *= age / 0.45;
   const H = S.H;
   let bb;
+  if (o.kind === 'area' && pos.quad) {
+    // Área: el plano rastreado relleno y con borde (en perspectiva); la etiqueta va derecha, en su centro
+    drawArea(g, o, pos.quad, clamp(a, 0, 1));
+    if (!(o.text || '').trim()) {
+      const xs = pos.quad.map(p => p.x),
+        ys = pos.quad.map(p => p.y),
+        x = Math.min(...xs),
+        y = Math.min(...ys);
+      return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+    }
+  }
   g.save();
   g.globalAlpha = clamp(a, 0, 1);
   g.translate(pos.x, pos.y);
@@ -231,10 +265,34 @@ export function drawOverlay(g, o, pos, alpha, age, local) {
     h = (bb.w * sr + bb.h * cr) * ps2;
   return { x: pos.x - w / 2, y: pos.y - h / 2, w, h };
 }
+function drawArea(g, o, quad, alpha) {
+  g.save();
+  g.globalAlpha = alpha;
+  g.beginPath();
+  quad.forEach((p, i) => (i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y)));
+  g.closePath();
+  g.globalAlpha = alpha * (o.fill ?? 0.3);
+  g.fillStyle = o.color;
+  g.fill();
+  g.globalAlpha = alpha;
+  g.lineJoin = 'round';
+  g.strokeStyle = 'rgba(8,9,12,.55)'; // sombra del borde: se ve sobre tierra clara y oscura
+  g.lineWidth = Math.max(3, S.H * 0.011);
+  g.stroke();
+  g.strokeStyle = o.color;
+  g.lineWidth = Math.max(2, S.H * 0.006);
+  g.stroke();
+  g.restore();
+}
 export function drawOverlaysFor(c, local, alpha) {
   for (const o of S.ovs) {
     if (o.clipId !== c.id || local < o.t0 || local > o.t1) continue;
-    const pos = ovPos(o, c, local),
+    let quad = null;
+    if (o.kind === 'area') {
+      quad = quadAt(c, local);
+      if (!quad) continue; // sin rastreo de 4 esquinas no hay área que dibujar
+    }
+    const pos = { ...ovPos(o, c, local), quad },
       bb = drawOverlay(ctx, o, pos, alpha, local - Math.max(o.t0, c.in), local);
     if (!S.exporting && alpha > 0.5) S.hits.push({ o, c, ...bb });
   }
@@ -322,7 +380,18 @@ export function drawGuides(T, act) {
       });
     }
     const cur = trackAt(c, local);
-    if (cur) {
+    if (cur && cur.q) {
+      // 4 esquinas: el contorno del plano en este cuadro
+      const q = quadAt(c, local);
+      ctx.strokeStyle = '#4fd1a5';
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      q.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.stroke();
+      const b = lw * 4;
+      q.forEach(p => ctx.strokeRect(p.x - b / 2, p.y - b / 2, b, b));
+    } else if (cur) {
       const m = mapSrc(c, cur.x, cur.y),
         b = coverOf(c).dw * (19 / 320);
       ctx.strokeStyle = '#4fd1a5';
@@ -339,11 +408,33 @@ export function drawGuides(T, act) {
     }
     ctx.restore();
   }
-  // Puntos marcados (y el primero mientras se espera el segundo)
-  const marks =
-    S.pickFirst && S.pickFirst.clipId === c.id
+  // Puntos marcados (y el primero mientras se espera el segundo; con 4 esquinas, las que ya se tocaron)
+  const pq = S.pickQuad && S.pickQuad.clipId === c.id ? S.pickQuad.pts : null,
+    tq = c.track && c.track.quad;
+  const marks = pq
+    ? pq
+    : S.pickFirst && S.pickFirst.clipId === c.id
       ? [S.pickFirst]
-      : [c.track && c.track.seed, c.track && c.track.seed2].filter(Boolean);
+      : tq
+        ? c.track.pts.length > 1
+          ? []
+          : tq
+        : [c.track && c.track.seed, c.track && c.track.seed2].filter(Boolean);
+  if ((pq && pq.length > 1) || (tq && !pq && marks.length === 4)) {
+    // contorno de las esquinas marcadas
+    ctx.save();
+    ctx.strokeStyle = '#ffd84d';
+    ctx.lineWidth = lw;
+    ctx.setLineDash([lw * 3, lw * 2]);
+    ctx.beginPath();
+    marks.forEach((s, i) => {
+      const m = mapSrc(c, s.x, s.y);
+      i ? ctx.lineTo(m.x, m.y) : ctx.moveTo(m.x, m.y);
+    });
+    if (marks.length === 4) ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
   ctx.save();
   ctx.strokeStyle = '#ffd84d';
   ctx.fillStyle = '#ffd84d';
@@ -362,7 +453,7 @@ export function drawGuides(T, act) {
     ctx.moveTo(m.x, m.y + r * 0.6);
     ctx.lineTo(m.x, m.y + r * 1.8);
     ctx.stroke();
-    if (marks.length > 1 || S.pickFirst) ctx.fillText(String(i + 1), m.x + r * 0.9, m.y - r * 0.9);
+    if (marks.length > 1 || S.pickFirst || pq) ctx.fillText(String(i + 1), m.x + r * 0.9, m.y - r * 0.9);
   });
   ctx.restore();
 }

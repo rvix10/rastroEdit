@@ -9,7 +9,8 @@ import { FrameSource, drawRotated } from './frames.js';
 import { AW, TrackCore } from './trackcore.js';
 
 /* ---------- rastreo: coordinación ----------
-   Rastreo 2D por punto (uno o dos; con dos se calcula también giro y escala, ver trackXform en render.js).
+   Rastreo 2D por punto (uno o dos; con dos se calcula también giro y escala, ver trackXform en render.js)
+   o de un plano con 4 esquinas (perspectiva, planar.js): cada muestra lleva además q = [x0,y0, …, x3,y3].
    El cálculo (trackcore.js) corre en un Web Worker para que la interfaz no se trabe; aquí se obtienen
    los cuadros, se arman las pasadas (hacia adelante y hacia atrás desde la semilla) y se guarda el resultado.
    Los cuadros salen de FrameSource (VideoDecoder, en orden): mucho más rápido que hacer seek en el <video>,
@@ -101,7 +102,7 @@ class Frames {
 
 /** Cálculo en un Web Worker (o en el hilo principal si no hay Workers). Misma interfaz con promesas. */
 class Core {
-  async init(AH, rgba, seeds) {
+  async init(AH, rgba, seeds, quad) {
     try {
       this.w = new Worker(new URL('./track-worker.js', import.meta.url), { type: 'module' });
       this.n = 0;
@@ -115,12 +116,12 @@ class Core {
         for (const p of this.wait.values()) p.no(new Error(e.message || 'Error en el rastreo'));
         this.wait.clear();
       };
-      await this.call({ type: 'init', AH, rgba, seeds });
+      await this.call({ type: 'init', AH, rgba, seeds, quad });
       this.inWorker = true;
     } catch (e) {
       // Sin Workers de módulo (navegadores viejos): mismo cálculo aquí
       this.close();
-      this.core = new TrackCore(AH, rgba, seeds);
+      this.core = new TrackCore(AH, rgba, seeds, quad);
       this.inWorker = false;
     }
   }
@@ -173,8 +174,15 @@ export async function runTrack(c, silent) {
   let lost = false,
     failed = null;
   const seed = c.track.seed,
-    seed2 = c.track.seed2 || null;
-  const first = { t: seed.t, x: seed.x, y: seed.y, ...(seed2 ? { x2: seed2.x, y2: seed2.y } : {}) };
+    seed2 = c.track.seed2 || null,
+    quad = c.track.quad || null;
+  const first = {
+    t: seed.t,
+    x: seed.x,
+    y: seed.y,
+    ...(seed2 ? { x2: seed2.x, y2: seed2.y } : {}),
+    ...(quad ? { q: quad.flatMap(p => [p.x, p.y]) } : {}),
+  };
   const fwd = [],
     back = [];
   const rebuild = () => {
@@ -183,7 +191,7 @@ export async function runTrack(c, silent) {
   try {
     await frames.open();
     // Copia: el búfer se transfiere al Worker
-    await core.init(AH, new Uint8ClampedArray(await frames.get(seed.t, c.in)), [seed, ...(seed2 ? [seed2] : [])]);
+    await core.init(AH, new Uint8ClampedArray(await frames.get(seed.t, c.in)), [seed, ...(seed2 ? [seed2] : [])], quad);
     const steps = Math.max(1, Math.ceil((c.out - c.in) / DT));
     let done = 0;
     for (const dir of [1, -1]) {
@@ -205,7 +213,13 @@ export async function runTrack(c, silent) {
           break;
         }
         const t = times[i],
-          e = { t, x: r.pts[0].x, y: r.pts[0].y, ...(r.pts[1] ? { x2: r.pts[1].x, y2: r.pts[1].y } : {}) };
+          e = {
+            t,
+            x: r.pts[0].x,
+            y: r.pts[0].y,
+            ...(r.pts[1] ? { x2: r.pts[1].x, y2: r.pts[1].y } : {}),
+            ...(r.q ? { q: r.q } : {}),
+          };
         // Los cuadros predichos (sin encontrar) cuentan solo si después se vuelven a encontrar todos los puntos
         if (r.pts.some(p => p.misses)) pending.push(e);
         else {
@@ -238,6 +252,8 @@ export async function runTrack(c, silent) {
         b = P2[i + 1];
       const q = { t: p.t, x: sm(a, p, b, 'x'), y: sm(a, p, b, 'y') };
       if (p.x2 != null) ((q.x2 = sm(a, p, b, 'x2')), (q.y2 = sm(a, p, b, 'y2')));
+      if (p.q && a.q && b.q) q.q = p.q.map((v, k) => (a.q[k] + v * 2 + b.q[k]) / 4);
+      else if (p.q) q.q = p.q;
       return q;
     });
   c.track.lost = lost;
@@ -254,7 +270,10 @@ export async function runTrack(c, silent) {
           ? 'Rastreo detenido'
           : lost
             ? 'Rastreo listo: el objeto se perdió en una parte del clip'
-            : 'Rastreo listo: ' + c.track.pts.length + ' muestras' + (c.track.seed2 ? ' · con giro y escala' : '')
+            : 'Rastreo listo: ' +
+              c.track.pts.length +
+              ' muestras' +
+              (c.track.quad ? ' · con perspectiva' : c.track.seed2 ? ' · con giro y escala' : '')
     );
     renderPanel();
   }

@@ -1550,9 +1550,9 @@ kbd {
   }
 }
 
-/* ---------- Vertical (tablet o celular): vista previa y línea de tiempo fijas, solo el panel se desplaza ----------
-   Si la pantalla es baja (celular acostado), se vuelve al desplazamiento normal de la página. */
-@media (max-width: 899px) and (min-height: 600px) {
+/* ---------- Tablet vertical: vista previa y línea de tiempo fijas, solo el panel se desplaza ----------
+   Hace falta alto (≥ 960 px) para que el panel tenga lugar. */
+@media (max-width: 899px) and (min-height: 960px) {
   html,
   body {
     height: 100%;
@@ -1577,11 +1577,45 @@ kbd {
     overscroll-behavior: contain;
   }
 }
-@media (max-width: 599px) and (min-height: 600px) {
-  #stage {
-    max-height: 28dvh;
+/* ---------- Celular vertical: se desplaza la página entera (un solo scroll, cómodo con el pulgar) ----------
+   La vista previa queda fija arriba (para tocar el video mientras se usa el panel) y las pestañas, abajo.
+   Más bajo que 600 px (celular acostado) vuelve al desplazamiento normal. */
+@media (max-width: 899px) and (min-height: 600px) and (max-height: 959.98px) {
+  :root {
+    --tabbar: 76px; /* alto de la barra de pestañas de abajo */
   }
-  .tl-scroll {
-    height: 112px;
+  .app {
+    grid-template-areas: 'head' 'stage' 'tl' 'panel';
+    padding-bottom: calc(var(--tabbar) + 16px + env(safe-area-inset-bottom, 0px));
+  }
+  .stage {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 7;
+    background: var(--bg);
+    margin-top: -10px; /* el fondo cubre el hueco de la grilla: lo que pasa por debajo no se ve */
+    padding-top: 10px;
+    padding-bottom: 6px;
+  }
+  #stage {
+    max-height: 30dvh;
+  }
+  .panel {
+    scroll-margin-top: 8px;
+  }
+  .tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9;
+    gap: 2px;
+    background: var(--panel);
+    border-top: 2px solid var(--edge);
+    padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px))
+      max(8px, env(safe-area-inset-left, 0px));
+  }
+  .toast {
+    bottom: calc(var(--tabbar) + 14px + env(safe-area-inset-bottom, 0px));
   }
 }

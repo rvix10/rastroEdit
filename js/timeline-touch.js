@@ -151,7 +151,9 @@ function startInertia(vx, vy) {
     vy *= 0.94;
     if (Math.abs(vx) < 0.4 && Math.abs(vy) < 0.4) return;
     tlScroll.scrollLeft -= vx;
+    const st = tlScroll.scrollTop;
     tlScroll.scrollTop -= vy;
+    if (tlScroll.scrollTop === st && vy) window.scrollBy(0, -vy); // en el borde: sigue la página
     inertia = requestAnimationFrame(step);
   };
   inertia = requestAnimationFrame(step);
@@ -191,6 +193,7 @@ function begin(e) {
     cy: e.clientY,
     sl: tlScroll.scrollLeft,
     st: tlScroll.scrollTop,
+    wy: window.scrollY,
     vx: 0,
     vy: 0,
     lt: performance.now(),
@@ -276,7 +279,12 @@ tlInner.addEventListener('pointermove', e => {
   } else if (G.mode === 'pend-pan' && moved) G.mode = 'pan';
   if (G.mode === 'pan') {
     tlScroll.scrollLeft = G.sl - (G.cx - G.sx);
-    tlScroll.scrollTop = G.st - (G.cy - G.sy);
+    // Lo vertical que la línea de tiempo no puede desplazar lo desplaza la página (celular vertical)
+    const want = G.st - (G.cy - G.sy),
+      max = tlScroll.scrollHeight - tlScroll.clientHeight;
+    tlScroll.scrollTop = want;
+    const extra = want < 0 ? want : want > max ? want - max : 0;
+    if (extra || window.scrollY !== G.wy) window.scrollTo(0, G.wy + extra);
   } else if (G.mode === 'scrub') seek(timeAt(e.clientX));
   else if (G.mode === 'reorder') updReorder(G);
   else if (G.mode === 'trim') updTrim(G);

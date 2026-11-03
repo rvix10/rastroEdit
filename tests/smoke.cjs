@@ -1,6 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
 //   node tests/smoke.cjs                 todo
-//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, rotacion, demux)
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, 4esquinas, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -96,6 +96,31 @@ function ensureExtra() {
       "[bg][o]overlay=x='500+60*t-w/2':y='360-h/2':eval=frame,format=yuv420p[v]",
     '-map',
     '[v]',
+    '-c:v',
+    'libvpx',
+    '-b:v',
+    '4M',
+  ]);
+  // Plano con textura (tipo tierra) y un lote marcado, en perspectiva que cambia: las esquinas de la imagen
+  // (0,0) (1280,0) (0,720) (1280,720) van a las de PLANAR_CORNERS(t)
+  run('planar.webm', [
+    '-f',
+    'lavfi',
+    '-i',
+    "nullsrc=s=160x90:r=30,geq=lum='128+90*(random(1)-0.5)':cb=128:cr=128,scale=1280:720:flags=bicubic",
+    '-f',
+    'lavfi',
+    '-i',
+    "nullsrc=s=640x360:r=30,geq=lum='128+60*(random(2)-0.5)':cb=128:cr=128,scale=1280:720:flags=bicubic",
+    '-filter_complex',
+    '[0:v][1:v]blend=all_mode=overlay,eq=contrast=1.3,colorchannelmixer=rr=0.55:gg=0.42:bb=0.3,' +
+      'drawbox=x=360:y=200:w=560:h=340:color=white@0.8:t=5,trim=end_frame=1,loop=loop=119:size=1:start=0,' +
+      "setpts=N/30/TB,perspective=x0='100+30*in/30':y0='60+40*in/30':x1='1180-50*in/30':y1='40+60*in/30':" +
+      "x2='60+20*in/30':y2='680-20*in/30':x3='1220-30*in/30':y3='700-40*in/30':sense=destination:eval=frame,format=yuv420p[v]",
+    '-map',
+    '[v]',
+    '-r',
+    '30',
     '-c:v',
     'libvpx',
     '-b:v',
@@ -481,6 +506,7 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       ['tablet vertical', 800, 1280],
       ['celular', 390, 844],
       ['celular angosto', 360, 740],
+      ['celular con barras del navegador', 390, 700],
       ['tablet horizontal', 1280, 800],
     ]) {
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true });
@@ -538,21 +564,78 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
         !small.size,
         `${name}: todo lo tocable mide al menos 44 px` + (small.size ? ': ' + [...small].join(' · ') : '')
       );
-      const lay = await page.evaluate(() => {
-        const pn = document.querySelector('#panel'),
-          top = () => Math.round(document.querySelector('#stage').getBoundingClientRect().top);
-        const t0 = top();
-        pn.scrollTop = 300;
-        return {
-          page: document.documentElement.scrollHeight - innerHeight,
-          h: document.documentElement.scrollWidth - innerWidth,
-          fixed: top() === t0,
-        };
-      });
-      check(
-        lay.page <= 0 && lay.h <= 0 && lay.fixed,
-        `${name}: la página no se desplaza; el panel sí, con la vista previa fija`
-      );
+      if (w >= 900 || h >= 960) {
+        // Tablet (o pantalla alta): nada se mueve salvo el panel
+        const lay = await page.evaluate(() => {
+          const pn = document.querySelector('#panel'),
+            top = () => Math.round(document.querySelector('#stage').getBoundingClientRect().top);
+          const t0 = top();
+          pn.scrollTop = 300;
+          return {
+            page: document.documentElement.scrollHeight - innerHeight,
+            h: document.documentElement.scrollWidth - innerWidth,
+            fixed: top() === t0,
+          };
+        });
+        check(
+          lay.page <= 0 && lay.h <= 0 && lay.fixed,
+          `${name}: la página no se desplaza; el panel sí, con la vista previa fija`
+        );
+      } else {
+        // Celular vertical: un solo desplazamiento (la página), vista previa fija arriba y pestañas abajo
+        const lay = await page.evaluate(async () => {
+          window.scrollTo(0, 0);
+          await new Promise(r => setTimeout(r, 100));
+          (await import('/js/panel.js')).setTab('media');
+          await new Promise(r => setTimeout(r, 900));
+          const st = document.querySelector('.stage'),
+            pn = document.querySelector('#panel'),
+            tb = document.querySelector('.tabs');
+          const shown = Math.abs(pn.getBoundingClientRect().top - st.getBoundingClientRect().bottom - 8) < 3;
+          window.scrollTo(0, 1e6);
+          await new Promise(r => setTimeout(r, 100));
+          const sb = st.getBoundingClientRect(),
+            tbb = tb.getBoundingClientRect();
+          const r = {
+            scrolls: document.documentElement.scrollHeight > innerHeight + 50,
+            inner: pn.scrollHeight <= pn.clientHeight + 1,
+            stage: sb.top >= 0 && sb.top < 2 && sb.bottom < innerHeight * 0.6,
+            tabs: Math.round(tbb.bottom) === innerHeight && tbb.top > innerHeight - 100,
+            end: pn.getBoundingClientRect().bottom <= tbb.top + 1,
+            h: document.documentElement.scrollWidth - innerWidth,
+            shown,
+          };
+          window.scrollTo(0, 0);
+          return r;
+        });
+        check(
+          lay.scrolls && lay.inner && lay.stage && lay.tabs && lay.end && lay.h <= 0 && lay.shown,
+          `${name}: se desplaza la página entera, con la vista previa fija arriba y las pestañas abajo` +
+            (lay.scrolls && lay.inner && lay.stage && lay.tabs && lay.end && lay.h <= 0 && lay.shown
+              ? ''
+              : ': ' + JSON.stringify(lay))
+        );
+        // Deslizar en vertical sobre la línea de tiempo también desplaza la página
+        const cdp = await ctx.newCDPSession(page);
+        const tl = await page.$eval('#tlScroll', e => {
+          const r = e.getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height - 12 };
+        });
+        const touch = (type, y) =>
+          cdp.send('Input.dispatchTouchEvent', {
+            type,
+            touchPoints: type === 'touchEnd' ? [] : [{ x: tl.x, y, id: 1 }],
+          });
+        await touch('touchStart', tl.y);
+        for (let k = 1; k <= 10; k++) {
+          await touch('touchMove', tl.y - k * 30);
+          await page.waitForTimeout(16);
+        }
+        await touch('touchEnd');
+        await page.waitForTimeout(400);
+        const sy = await page.evaluate(() => scrollY);
+        check(sy > 60, `${name}: deslizar hacia arriba sobre la línea de tiempo baja la página (${Math.round(sy)} px)`);
+      }
       await ctx.close();
     }
     // En PC con mouse se mantiene el diseño compacto
@@ -1656,6 +1739,144 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       15000
     );
     check(kept, 'tras recargar, se conservan los 2 puntos y las opciones del texto');
+    check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
+    await page.close();
+  }
+
+  // Rastreo de 4 esquinas (plano en perspectiva): precisión contra la verdad, área, mismo resultado sin Worker, guardado
+  if (run('4esquinas') && extra['planar.webm']) {
+    console.log('\nRastreo de 4 esquinas (plano en perspectiva)');
+    // Esquinas de la imagen en el tiempo t (las del filtro perspective) y el lote (en px de la imagen original)
+    const CORNERS = t => [
+      [100 + 30 * t, 60 + 40 * t],
+      [1180 - 50 * t, 40 + 60 * t],
+      [60 + 20 * t, 680 - 20 * t],
+      [1220 - 30 * t, 700 - 40 * t],
+    ];
+    const LOT = [
+      [362, 202],
+      [917, 202],
+      [917, 537],
+      [362, 537],
+    ];
+    // Verdad: el lote en el video en el tiempo t, en orden (arriba izq., arriba der., abajo der., abajo izq.)
+    const truthSrc = `const pl = await import('/js/planar.js'), CORNERS = ${CORNERS.toString()}, LOT = ${JSON.stringify(LOT)};
+      const truth = t => { const h = pl.hFit([[0, 0], [1280, 0], [0, 720], [1280, 720]], CORNERS(t)); return LOT.map(([x, y]) => pl.hApply(h, x, y)); };`;
+    const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+    const errs = [];
+    page.on('pageerror', e => errs.push(e.message));
+    page.on('console', m => m.type() === 'error' && errs.push(m.text()));
+    await page.goto(url);
+    await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+    await page.click('[data-tab="media"]');
+    await page.setInputFiles('#fileIn', extra['planar.webm']);
+    await until(page, async () => (await import('/js/state.js')).S.clips.some(c => c.kind === 'video'), null, 20000);
+    await page.evaluate(`(async () => { ${mods} ac.act('clearDemo'); st.S.T = st.S.clips[0]._start + 1; })()`);
+    await page.click('[data-tab="track"]');
+    await page.click('[data-act="trackPts:4"]');
+    await page.click('[data-act="pick"]');
+    await page.waitForTimeout(300);
+    const box = await page.$eval('#stage', e => {
+      const r = e.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height };
+    });
+    const at1 = await page.evaluate(`(async () => { ${truthSrc} return truth(1); })()`);
+    // En desorden: el editor las ordena
+    for (const k of [2, 0, 3, 1])
+      await page.mouse.click(box.x + (at1[k][0] / 1280) * box.w, box.y + (at1[k][1] / 720) * box.h);
+    const marked = await page.evaluate(
+      `(async () => { ${mods} const t = st.S.clips[0].track; return !!(t && t.quad && t.quad.length === 4 && !st.S.pick) })()`
+    );
+    check(marked, 'marca 4 esquinas con cuatro toques (en cualquier orden)');
+    const t0 = Date.now();
+    await page.click('[data-act="track"]');
+    await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        return !S.tracking && S.clips[0].track.pts.length > 20;
+      },
+      null,
+      120000
+    );
+    const secs = (Date.now() - t0) / 1000;
+    const acc = await page.evaluate(
+      `(async () => { ${mods} ${truthSrc} const rd = await import('/js/render.js'), c = st.S.clips[0];
+        let worst = 0;
+        for (const t of [0, 0.5, 1.5, 2.5, 3.3, 3.9]) {
+          const tp = rd.trackAt(c, t), T = truth(t);
+          T.forEach(([x, y], k) => (worst = Math.max(worst, Math.hypot(tp.q[k * 2] * 1280 - x, tp.q[k * 2 + 1] * 720 - y))));
+        }
+        const P = c.track.pts;
+        return { worst, from: P[0].t, to: P[P.length - 1].t, lost: c.track.lost } })()`
+    );
+    check(
+      acc.worst < 6 && acc.from < 0.1 && acc.to > 3.8 && !acc.lost,
+      `las 4 esquinas siguen al plano en todo el clip (error máx. ${acc.worst.toFixed(1)} px, ${secs.toFixed(1)} s)`
+    );
+    // Área con etiqueta: se dibuja en el plano y la etiqueta queda en su centro
+    await page.click('[data-act="addArea"]');
+    const area = await page.evaluate(
+      `(async () => { ${mods} ${truthSrc} const rd = await import('/js/render.js'), c = st.S.clips[0], o = st.S.ovs[st.S.ovs.length - 1];
+        const T = truth(3).flat(), [cx, cy] = pl.quadCenter(T), p = rd.ovPos(o, c, 3);
+        st.S.T = c._start + 3; rd.renderFrame(st.S.T);
+        return { kind: o.kind, err: Math.hypot(p.x - cx, p.y - cy), drawn: st.S.hits.some(h => h.o === o),
+          fill: !!document.querySelector('#k-ovfill') } })()`
+    );
+    check(
+      area.kind === 'area' && area.drawn && area.fill && area.err < 4,
+      `área con etiqueta: se dibuja y la etiqueta sigue al centro del plano (error ${area.err.toFixed(1)} px)`
+    );
+    // Un texto que sigue al plano también cambia de tamaño con él (cuando la cámara se aleja)
+    const sc = await page.evaluate(
+      `(async () => { ${mods} ${truthSrc} const rd = await import('/js/render.js'), c = st.S.clips[0];
+        const w = t => { const T = truth(t); return Math.hypot((T[1][0] + T[2][0] - T[0][0] - T[3][0]) / 2, (T[1][1] + T[2][1] - T[0][1] - T[3][1]) / 2); };
+        return Math.abs(rd.trackXform(c, 3.5).scale / (w(3.5) / w(1)) - 1) })()`
+    );
+    check(sc < 0.02, `escala del plano para los textos que lo siguen (error ${(sc * 100).toFixed(1)} %)`);
+    // Mismo resultado sin Worker (cálculo en el hilo principal)
+    const ref = await page.evaluate(
+      `(async () => { ${mods} const t = st.S.clips[0].track; return { quad: t.quad, seed: t.seed, q: t.pts.map(p => p.q) } })()`
+    );
+    {
+      const p2 = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+      await p2.addInitScript(() => (window.Worker = undefined));
+      await p2.goto(url);
+      await until(p2, async () => (await import('/js/state.js')).S.clips.length >= 1);
+      await p2.click('[data-tab="media"]');
+      await p2.setInputFiles('#fileIn', extra['planar.webm']);
+      await until(p2, async () => (await import('/js/state.js')).S.clips.some(c => c.kind === 'video'), null, 20000);
+      const diff = await p2.evaluate(
+        `(async () => { ${mods} const tr = await import('/js/tracker.js'); ac.act('clearDemo'); const ref = ${JSON.stringify(ref)};
+          const c = st.S.clips.find(k => k.kind === 'video'); c.track = { seed: ref.seed, quad: ref.quad, pts: [] };
+          await tr.runTrack(c, true);
+          const q = c.track.pts.map(p => p.q);
+          if (q.length !== ref.q.length) return 1;
+          let d = 0; q.forEach((a, i) => a.forEach((v, k) => (d = Math.max(d, Math.abs(v - ref.q[i][k]))))); return d })()`
+      );
+      check(diff < 1e-9, 'mismo resultado sin Worker (en el hilo principal)');
+      await p2.close();
+    }
+    // Se guarda con el proyecto
+    await page.evaluate(`(async () => { ${mods} await pj.saveNow(); })()`);
+    await page.reload();
+    const kept = await until(
+      page,
+      async () => {
+        const { S } = await import('/js/state.js');
+        const c = S.clips[0],
+          o = S.ovs[S.ovs.length - 1];
+        return S.clips.length === 1 && c.track && c.track.quad && c.track.pts[5].q && o && o.kind === 'area';
+      },
+      null,
+      15000
+    );
+    check(kept, 'tras recargar, se conservan las esquinas, el rastreo y el área');
+    // Borrar el rastreo quita el área (no tendría dónde dibujarse)
+    const cleared = await page.evaluate(
+      `(async () => { ${mods} st.S.sel = st.S.clips[0].id; ac.act('clearTrack'); return !st.S.ovs.some(o => o.kind === 'area') })()`
+    );
+    check(cleared, 'borrar el rastreo quita el área');
     check(!errs.length, 'sin errores' + (errs.length ? ': ' + errs.join(' | ') : ''));
     await page.close();
   }

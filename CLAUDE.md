@@ -13,9 +13,9 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Verificar sintaxis: `for f in js/*.js; do node --check --input-type=module < $f; done`
 - Formato: `prettier --write js/*.js css/styles.css` (config en `.prettierrc`; una sentencia por línea).
 - Prueba de humo: `node tests/smoke.cjs` (o solo algunas secciones: `node tests/smoke.cjs tactil 2puntos`;
-  secciones: basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
+  secciones: basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, 4esquinas, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
   del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
-  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo rápido (tiempo, sin trabas, mismo resultado sin Worker), accesibilidad y primer uso (contraste, nombres, teclado, avisos, bienvenida), app instalable (manifiesto, sin conexión, diagnóstico), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
+  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo rápido (tiempo, sin trabas, mismo resultado sin Worker), accesibilidad y primer uso (contraste, nombres, teclado, avisos, bienvenida), app instalable (manifiesto, sin conexión, diagnóstico), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rastreo de 4 esquinas (plano en perspectiva contra la verdad, área, sin Worker, guardado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
@@ -47,7 +47,8 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `render.js` | `renderFrame(T)`: compone clips, transición, overlays y guías; `trackAt`, `trackXform`, `ovPos`/`ovSetAbs` |
 | `playback.js` | Bucle `requestAnimationFrame`; al reproducir, el reloj del proyecto sigue al `<video>` activo (`videoClock`) |
 | `tracker.js` | Coordina el rastreo: cuadros de análisis con `FrameSource` (hacia atrás, por tramos de 2 s decodificados en orden), pasadas adelante/atrás, suavizado y resultado |
-| `trackcore.js` | Cálculo del rastreo sin DOM (`TrackCore`): ZNCC, desenfoque, plantilla adaptativa, subpíxel; con 2 puntos, plantilla original deformada con el giro/escala previstos |
+| `trackcore.js` | Cálculo del rastreo sin DOM (`TrackCore`): ZNCC, desenfoque, plantilla adaptativa, subpíxel; con 2 puntos, plantilla original deformada con el giro/escala previstos; con 4 esquinas delega en `PlanarCore` |
+| `planar.js` | Rastreo planar (4 esquinas) sin DOM: homografías (`hFit` DLT normalizado, `ransacH` con semilla fija), puntos con textura, paso cuadro a cuadro + corrección contra el cuadro de las esquinas; utilidades de cuadriláteros (`quadCenter`, `orderQuad`…) |
 | `track-worker.js` | Web Worker que corre `TrackCore` (si no hay Workers de módulo, `tracker.js` lo usa en el hilo principal) |
 | `export.js` | Elige cómo exportar: rápida (`fastexport.js`) o, si no hay WebCodecs o falla, `MediaRecorder` en tiempo real (`S.fastBroken`) |
 | `fastexport.js` | Exportación con WebCodecs: cuadro por cuadro (`renderFrame` + `VideoEncoder`) a 720p/1080p/4K (`exportSize`, `QUALITIES`), audio mezclado con `OfflineAudioContext` + `AudioEncoder`; escribe en disco (OPFS) |
@@ -108,6 +109,12 @@ compila `.github/workflows/android.yml`) y `store/` (ficha de Play y material gr
 - Selectores de archivo (`#fileIn`, `#relinkIn`, `#rastroIn`, `#musicIn`): están fijos en `#pickers` (index.html), fuera
   del panel, y el panel los abre con `<label for>`. No pongas `<input type="file">` dentro del panel: se redibuja (al
   autoguardar, al terminar un rastreo…) y el archivo elegido se perdería si el diálogo estaba abierto.
+- Rastreo de 4 esquinas: `track.quad = [{x,y}×4]` (normalizadas, orden: arriba izq., arriba der., abajo der., abajo izq.;
+  `orderQuad` ordena los toques) y `track.seed` = cruce de las diagonales (`quadCenter`). Cada muestra lleva `q` (8 números) y
+  `x,y` = su centro. `quadAt(c, local)` da las esquinas en el lienzo. `trackXform` saca giro/escala del segmento entre los
+  centros de los lados izquierdo y derecho, así los overlays que siguen funcionan igual que con 2 puntos. El overlay
+  `kind: 'area'` (con `fill` 0–0,8) dibuja el plano relleno y su etiqueta en el centro; sin rastreo de 4 esquinas no se dibuja,
+  y `clearTrack` lo quita. RANSAC usa `mulberry32` con semilla por cuadro: con y sin Worker el resultado es idéntico.
 - Rastreo: solo uno a la vez (`S.tracking`). El automático del ejemplo es silencioso (`S.trackSilent`) y cede el paso si
   la persona pide otro; quitar el clip que se rastrea pone `S.trackCancel`. El resultado debe ser idéntico con o sin Worker.
 - Accesibilidad: todo lo tocable que no sea `<button>`/`<input>` (clips, barras, listas) lleva `tabindex="0"`,
@@ -134,8 +141,12 @@ compila `.github/workflows/android.yml`) y `store/` (ficha de Play y material gr
 - Pantallas táctiles: dentro de `@media (pointer: coarse)` todo lo tocable mide al menos 44 px (al final de `styles.css`);
   en PC con mouse el diseño sigue compacto. Si agregas un control, súmalo ahí (la sección `tablet` de la prueba lo revisa).
   Algo que deba verse chico (insignias de transición) usa un `::before` invisible de 44×44 como área táctil.
-- Vertical (< 900 px de ancho y ≥ 600 px de alto): la página no se desplaza; vista previa y línea de tiempo quedan fijas
-  y solo `#panel` tiene scroll. Más bajo que eso (celular acostado) vuelve al scroll normal.
+- Vertical (< 900 px de ancho y ≥ 600 px de alto), dos diseños:
+  - Tablet (≥ 960 px de alto): la página no se desplaza; vista previa y línea de tiempo quedan fijas y solo `#panel` tiene scroll.
+  - Celular (< 960 px de alto): se desplaza la página entera (un solo scroll). `.stage` es `sticky` arriba y `.tabs` es una
+    barra fija abajo (`--tabbar`); al cambiar de pestaña, `showPanel()` (panel.js) baja hasta el panel. Lo vertical que la
+    línea de tiempo no puede desplazar pasa a la página (timeline-touch.js).
+  Más bajo que 600 px (celular acostado) vuelve al scroll normal. La sección `tablet` de la prueba revisa los tres casos.
 - Sin servicios externos: nada de CDNs ni fuentes remotas (la sección `pwa` de la prueba lo revisa). Es lo que permite
   declarar en Play que la app no recopila ni comparte datos.
 - Android: la app de Play abre la web publicada (no copia sus archivos), así que publicar en `main` la actualiza.
@@ -145,4 +156,5 @@ compila `.github/workflows/android.yml`) y `store/` (ficha de Play y material gr
 
 ## Pendiente (en orden propuesto)
 
-1. Tracking planar de 4 esquinas (homografía) para reemplazar pantallas/letreros en perspectiva.
+1. Poner una imagen o video dentro del plano rastreado (pantallas, letreros) con la homografía (malla de triángulos en el lienzo).
+2. Medir la superficie del área a partir de un lado de largo conocido (vista cenital) o de las medidas del lote.

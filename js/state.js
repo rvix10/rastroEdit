@@ -22,7 +22,8 @@ export const S = {
   pps: 70,
   pick: false,
   pickFirst: null, // rastreo de 2 puntos: primer toque, a la espera del segundo
-  trackPts: 1, // 1 o 2 puntos al marcar
+  pickQuad: null, // rastreo de 4 esquinas: { clipId, t, pts } mientras se tocan
+  trackPts: 1, // 1, 2 o 4 (esquinas) al marcar
   showPath: true,
   tracking: null,
   trackCancel: false,
