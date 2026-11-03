@@ -23,6 +23,7 @@ Los videos se procesan en el dispositivo; nada se sube a ningún servidor.
 | **Primer uso** | Proyecto de ejemplo con una bienvenida que explica qué mirar y un botón para empezar el propio. |
 | **App instalable** | Se instala como app (ícono, pantalla completa) desde Proyectos → Este dispositivo, o desde el menú del navegador. Funciona **sin conexión**. |
 | **Diagnóstico** | Proyectos → Este dispositivo: núcleos, GPU, qué códecs abre y exporta (y si por hardware) y una medición en «× tiempo real». El informe se copia para compartirlo. |
+| **Google Play** | App de Android (Trusted Web Activity) en `android/`, compilada por GitHub Actions; guía de publicación en `android/README.md`, ficha y capturas en `store/`. Política de privacidad: `privacy.html`. |
 | **Exportar** | MP4 en **720p, 1080p o 4K** y calidad Ligera, Normal o Alta (muestra el peso máximo), armado cuadro por cuadro con WebCodecs (H.264 o VP9, audio AAC u Opus): no depende de reproducir en tiempo real, cada cuadro es exacto y el texto se dibuja a la resolución de salida. El video se escribe en el disco a medida que se codifica. En navegadores sin WebCodecs, graba el lienzo con `MediaRecorder` en tiempo real. Si cambias de pestaña, se pausa y sigue al volver. |
 
 ## Cómo correrlo
