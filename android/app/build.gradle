@@ -1,0 +1,64 @@
+plugins {
+    id 'com.android.application'
+}
+
+def appId = project.property('rastro.applicationId')
+def host = project.property('rastro.host')
+def startUrl = "https://${host}${project.property('rastro.startPath')}"
+// Cada compilación en GitHub Actions sube el número de versión (Play exige que siempre crezca)
+def runNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'io.github.rvix10.rastro'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId appId
+        minSdk 23
+        targetSdk 36
+        versionCode runNumber
+        versionName project.property('rastro.versionName')
+
+        manifestPlaceholders = [
+            hostName       : host,
+            startPath      : project.property('rastro.startPath'),
+            defaultUrl     : startUrl,
+            launcherName   : project.property('rastro.appName'),
+        ]
+        // Digital Asset Links: la app declara que confía en el sitio (el sitio declara lo mismo en assetlinks.json)
+        resValue 'string', 'asset_statements', """
+            [{ \\"relation\\": [\\"delegate_permission/common.handle_all_urls\\"],
+               \\"target\\": { \\"namespace\\": \\"web\\", \\"site\\": \\"https://${host}\\" } }]
+        """.stripIndent().trim()
+    }
+
+    // Firma de publicación: solo si GitHub Actions tiene la llave (secretos RASTRO_*). Si no, se compila sin firmar.
+    def ks = System.getenv('RASTRO_KEYSTORE')
+    signingConfigs {
+        if (ks) {
+            upload {
+                storeFile file(ks)
+                storePassword System.getenv('RASTRO_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('RASTRO_KEY_ALIAS')
+                keyPassword System.getenv('RASTRO_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ks) signingConfig signingConfigs.upload
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // Biblioteca de Google para Trusted Web Activities (la usa también Bubblewrap)
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

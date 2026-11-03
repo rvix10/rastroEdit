@@ -4,3 +4,11 @@ node_modules/
 .vscode/
 .idea/
 tests/fixtures/
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+# Llaves de firma: nunca en el repo
+*.jks
+*.keystore

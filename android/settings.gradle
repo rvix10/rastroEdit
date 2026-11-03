@@ -1,0 +1,17 @@
+// Rastro para Android: Trusted Web Activity (TWA) que abre la app web publicada en Chrome, a pantalla completa.
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = 'rastro-android'
+include ':app'
