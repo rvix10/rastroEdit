@@ -44,14 +44,25 @@ export function setTab(t) {
   if (t !== 'track') S.pick = false;
   renderTabs();
   renderPanel();
-  if (t === 'projects') {
-    refreshList();
-    if (matchMedia('(max-width: 899px)').matches)
-      panel.scrollIntoView({
-        behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-        block: 'start',
-      });
-  }
+  if (t === 'projects') refreshList();
+  showPanel(t === 'projects');
+}
+/**
+ * Celular vertical (la página se desplaza y la vista previa queda fija arriba): al cambiar de pestaña,
+ * baja hasta el panel si no se ve, dejándolo justo debajo de la vista previa.
+ * Celular acostado (desplazamiento normal): solo para Proyectos, que suele quedar más abajo.
+ */
+function showPanel(always) {
+  const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  const stage = document.querySelector('.stage');
+  if (getComputedStyle(stage).position === 'sticky') {
+    // Ya fija arriba, la vista previa ocupa desde su `top` hasta su alto
+    const r = stage.getBoundingClientRect(),
+      under = (parseFloat(getComputedStyle(stage).top) || 0) + r.height,
+      top = panel.getBoundingClientRect().top;
+    if (top < r.bottom + 4 || top > innerHeight * 0.55)
+      window.scrollTo({ top: Math.max(0, scrollY + top - under - 8), behavior });
+  } else if (always && matchMedia('(max-width: 899px)').matches) panel.scrollIntoView({ behavior, block: 'start' });
 }
 
 export const COLORS = ['#ffffff', '#ffd84d', '#4fd1a5', '#ff6b57', '#3d5afe', '#f1a93b', '#121212'];

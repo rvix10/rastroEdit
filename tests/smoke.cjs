@@ -506,6 +506,7 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       ['tablet vertical', 800, 1280],
       ['celular', 390, 844],
       ['celular angosto', 360, 740],
+      ['celular con barras del navegador', 390, 700],
       ['tablet horizontal', 1280, 800],
     ]) {
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true });
@@ -563,21 +564,78 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
         !small.size,
         `${name}: todo lo tocable mide al menos 44 px` + (small.size ? ': ' + [...small].join(' · ') : '')
       );
-      const lay = await page.evaluate(() => {
-        const pn = document.querySelector('#panel'),
-          top = () => Math.round(document.querySelector('#stage').getBoundingClientRect().top);
-        const t0 = top();
-        pn.scrollTop = 300;
-        return {
-          page: document.documentElement.scrollHeight - innerHeight,
-          h: document.documentElement.scrollWidth - innerWidth,
-          fixed: top() === t0,
-        };
-      });
-      check(
-        lay.page <= 0 && lay.h <= 0 && lay.fixed,
-        `${name}: la página no se desplaza; el panel sí, con la vista previa fija`
-      );
+      if (w >= 900 || h >= 960) {
+        // Tablet (o pantalla alta): nada se mueve salvo el panel
+        const lay = await page.evaluate(() => {
+          const pn = document.querySelector('#panel'),
+            top = () => Math.round(document.querySelector('#stage').getBoundingClientRect().top);
+          const t0 = top();
+          pn.scrollTop = 300;
+          return {
+            page: document.documentElement.scrollHeight - innerHeight,
+            h: document.documentElement.scrollWidth - innerWidth,
+            fixed: top() === t0,
+          };
+        });
+        check(
+          lay.page <= 0 && lay.h <= 0 && lay.fixed,
+          `${name}: la página no se desplaza; el panel sí, con la vista previa fija`
+        );
+      } else {
+        // Celular vertical: un solo desplazamiento (la página), vista previa fija arriba y pestañas abajo
+        const lay = await page.evaluate(async () => {
+          window.scrollTo(0, 0);
+          await new Promise(r => setTimeout(r, 100));
+          (await import('/js/panel.js')).setTab('media');
+          await new Promise(r => setTimeout(r, 900));
+          const st = document.querySelector('.stage'),
+            pn = document.querySelector('#panel'),
+            tb = document.querySelector('.tabs');
+          const shown = Math.abs(pn.getBoundingClientRect().top - st.getBoundingClientRect().bottom - 8) < 3;
+          window.scrollTo(0, 1e6);
+          await new Promise(r => setTimeout(r, 100));
+          const sb = st.getBoundingClientRect(),
+            tbb = tb.getBoundingClientRect();
+          const r = {
+            scrolls: document.documentElement.scrollHeight > innerHeight + 50,
+            inner: pn.scrollHeight <= pn.clientHeight + 1,
+            stage: sb.top >= 0 && sb.top < 2 && sb.bottom < innerHeight * 0.6,
+            tabs: Math.round(tbb.bottom) === innerHeight && tbb.top > innerHeight - 100,
+            end: pn.getBoundingClientRect().bottom <= tbb.top + 1,
+            h: document.documentElement.scrollWidth - innerWidth,
+            shown,
+          };
+          window.scrollTo(0, 0);
+          return r;
+        });
+        check(
+          lay.scrolls && lay.inner && lay.stage && lay.tabs && lay.end && lay.h <= 0 && lay.shown,
+          `${name}: se desplaza la página entera, con la vista previa fija arriba y las pestañas abajo` +
+            (lay.scrolls && lay.inner && lay.stage && lay.tabs && lay.end && lay.h <= 0 && lay.shown
+              ? ''
+              : ': ' + JSON.stringify(lay))
+        );
+        // Deslizar en vertical sobre la línea de tiempo también desplaza la página
+        const cdp = await ctx.newCDPSession(page);
+        const tl = await page.$eval('#tlScroll', e => {
+          const r = e.getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height - 12 };
+        });
+        const touch = (type, y) =>
+          cdp.send('Input.dispatchTouchEvent', {
+            type,
+            touchPoints: type === 'touchEnd' ? [] : [{ x: tl.x, y, id: 1 }],
+          });
+        await touch('touchStart', tl.y);
+        for (let k = 1; k <= 10; k++) {
+          await touch('touchMove', tl.y - k * 30);
+          await page.waitForTimeout(16);
+        }
+        await touch('touchEnd');
+        await page.waitForTimeout(400);
+        const sy = await page.evaluate(() => scrollY);
+        check(sy > 60, `${name}: deslizar hacia arriba sobre la línea de tiempo baja la página (${Math.round(sy)} px)`);
+      }
       await ctx.close();
     }
     // En PC con mouse se mantiene el diseño compacto

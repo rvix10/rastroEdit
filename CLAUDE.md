@@ -141,8 +141,12 @@ compila `.github/workflows/android.yml`) y `store/` (ficha de Play y material gr
 - Pantallas táctiles: dentro de `@media (pointer: coarse)` todo lo tocable mide al menos 44 px (al final de `styles.css`);
   en PC con mouse el diseño sigue compacto. Si agregas un control, súmalo ahí (la sección `tablet` de la prueba lo revisa).
   Algo que deba verse chico (insignias de transición) usa un `::before` invisible de 44×44 como área táctil.
-- Vertical (< 900 px de ancho y ≥ 600 px de alto): la página no se desplaza; vista previa y línea de tiempo quedan fijas
-  y solo `#panel` tiene scroll. Más bajo que eso (celular acostado) vuelve al scroll normal.
+- Vertical (< 900 px de ancho y ≥ 600 px de alto), dos diseños:
+  - Tablet (≥ 960 px de alto): la página no se desplaza; vista previa y línea de tiempo quedan fijas y solo `#panel` tiene scroll.
+  - Celular (< 960 px de alto): se desplaza la página entera (un solo scroll). `.stage` es `sticky` arriba y `.tabs` es una
+    barra fija abajo (`--tabbar`); al cambiar de pestaña, `showPanel()` (panel.js) baja hasta el panel. Lo vertical que la
+    línea de tiempo no puede desplazar pasa a la página (timeline-touch.js).
+  Más bajo que 600 px (celular acostado) vuelve al scroll normal. La sección `tablet` de la prueba revisa los tres casos.
 - Sin servicios externos: nada de CDNs ni fuentes remotas (la sección `pwa` de la prueba lo revisa). Es lo que permite
   declarar en Play que la app no recopila ni comparte datos.
 - Android: la app de Play abre la web publicada (no copia sus archivos), así que publicar en `main` la actualiza.
