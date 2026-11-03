@@ -62,6 +62,7 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `project.js` | Serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer (`P`), `collectMedia()`, archivo `.rastro` |
 | `archive.js` | Zip mínimo sin dependencias (`zip`/`unzip`): escribe sin comprimir, lee por rebanadas, sin ZIP64 (máx. 4 GB) |
 | `pwa.js` | App instalable: registra `sw.js`, guarda el aviso de instalación (`S.pwa`), `promptInstall()`, `isStandalone()` |
+| `theme.js` | Apariencia: automática (sistema), clara u oscura (`setTheme`, `toggleTheme`); `data-theme` en `<html>`, preferencia en `localStorage` |
 | `diag.js` | Diagnóstico (Proyectos → Este dispositivo): hardware, códecs por hardware/software, medición en «× tiempo real», informe |
 
 Fuera de `js/`: `sw.js` (service worker: la app funciona sin conexión), `manifest.webmanifest`, `icons/`,
@@ -122,6 +123,12 @@ compila `.github/workflows/android.yml`) y `store/` (ficha de Play y material gr
   Sube `CACHE` solo si cambia la forma de guardar; con red primero, una versión nueva nunca queda vieja.
 - UI con `data-act="accion:arg"`, `data-tab`, `data-k` (inputs). No usar `alert/confirm/prompt`: confirmaciones dentro de la página.
 - Textos de la interfaz en español, directos, desde el lado del usuario. Toast tras acciones ("Clip dividido", "Proyecto eliminado").
+- Estilo visual: bordes gruesos (`2px solid var(--edge)`), sombras planas desplazadas (`--sh`, `--sh-lg`), botones en píldora
+  y colores vivos (azul `--accent`, limón `--hi`, menta `--trk`, coral `--ov`). Fuente de la interfaz: Space Grotesk; Manrope,
+  Unbounded y Caveat son solo para los textos del video.
+- Temas: claro por defecto; el oscuro redefine los tokens en `@media (prefers-color-scheme: dark)` (si no hay `data-theme="light"`)
+  y en `:root[data-theme="dark"]`. Si agregas un token, defínelo en los tres bloques. Texto sobre limón/menta/coral usa `--ink`
+  (oscuro en ambos temas). Lo dibujado en el lienzo (vista previa) no depende del tema. La sección `acceso` revisa el contraste en los dos.
 - Colores siempre desde los tokens de `:root` en `css/styles.css`. Debe funcionar a 360 px de ancho sin scroll horizontal
   ni texto cortado dentro de los botones (la sección `tablet` de la prueba revisa 360 px).
 - Pantallas táctiles: dentro de `@media (pointer: coarse)` todo lo tocable mide al menos 44 px (al final de `styles.css`);

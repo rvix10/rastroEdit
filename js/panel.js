@@ -6,6 +6,7 @@ import { RESOLUTIONS, QUALITIES } from './fastexport.js';
 import { act } from './actions.js';
 import { P, refreshList } from './project.js';
 import { isStandalone, onPwaChange } from './pwa.js';
+import { getTheme, onThemeChange } from './theme.js';
 
 /* ---------- UI: pestañas ---------- */
 export const TABS = [
@@ -53,7 +54,7 @@ export function setTab(t) {
   }
 }
 
-export const COLORS = ['#ffffff', '#f1a93b', '#4fd1c5', '#ef6b5c', '#a68bf0', '#ffe066', '#14161b'];
+export const COLORS = ['#ffffff', '#ffd84d', '#4fd1a5', '#ff6b57', '#3d5afe', '#f1a93b', '#121212'];
 export const STICKERS = ['⚽', '🔥', '⭐', '👉', '❤️', '😂', '🎯', '📍'];
 export function needClip() {
   return '<p class="empty">Selecciona un clip en la línea de tiempo.</p>';
@@ -125,7 +126,7 @@ export function renderPanel() {
     const i = c ? S.clips.indexOf(c) : -1;
     if (!c) h = '<h2>Transición</h2>' + needClip();
     else if (i === 0)
-      h = `<h2>Transición</h2><p class="empty">El primer clip no tiene entrada. Selecciona el clip 2 o posterior, o toca un rombo naranja entre clips.</p>`;
+      h = `<h2>Transición</h2><p class="empty">El primer clip no tiene entrada. Selecciona el clip 2 o posterior, o toca la insignia amarilla entre dos clips.</p>`;
     else {
       const prev = S.clips[i - 1];
       h = `<h2>Transición de entrada</h2><p class="sub">Entre «${esc(prev.name)}» y «${esc(c.name)}»</p>
@@ -375,6 +376,7 @@ export function projectsPanel() {
 }
 // Este dispositivo: instalar la app y diagnóstico (diag.js)
 onPwaChange(() => S.tab === 'projects' && renderPanel());
+onThemeChange(() => S.tab === 'projects' && renderPanel());
 function deviceBlock() {
   const d = S.diag || {},
     pwa = S.pwa || {};
@@ -405,7 +407,17 @@ function deviceBlock() {
   if (d.bench)
     res += `<dl class="specs bench">${d.bench.map(r => `<dt>${esc(r.n)}</dt><dd>${esc(r.v)}</dd>`).join('')}</dl>`;
   const busy = d.running;
-  return `<div class="lbl">Este dispositivo</div>
+  const th = getTheme();
+  return `<div class="lbl">Apariencia</div>
+    <div class="seg" role="group" aria-label="Apariencia">${[
+      ['auto', 'Automática'],
+      ['light', 'Clara'],
+      ['dark', 'Oscura'],
+    ]
+      .map(([k, n]) => `<button data-act="themeSet:${k}" aria-pressed="${th === k}">${n}</button>`)
+      .join('')}</div>
+    <p class="note">Automática sigue la configuración de tu dispositivo.</p>
+    <div class="lbl">Este dispositivo</div>
     ${install}
     ${
       busy
