@@ -413,7 +413,8 @@ function deviceBlock() {
         : `<div class="grid2"><button data-act="diagRun">${d.info ? 'Volver a revisar' : 'Diagnóstico'}</button><button data-act="benchRun">Medir rendimiento</button></div>`
     }
     ${res}
-    ${d.info && !busy ? '<button data-act="diagCopy">Copiar informe</button><p class="note" id="diagMsg">Puedes pegar el informe en un mensaje para compartir qué puede hacer este equipo.</p>' : ''}`;
+    ${d.info && !busy ? '<button data-act="diagCopy">Copiar informe</button><p class="note" id="diagMsg">Puedes pegar el informe en un mensaje para compartir qué puede hacer este equipo.</p>' : ''}
+    <p class="note">Tus videos se procesan en este dispositivo y no se suben a ningún servidor. <a href="privacy.html">Política de privacidad</a></p>`;
 }
 // Archivo .rastro: el proyecto con sus videos, para abrirlo en otro equipo
 function fileBlock() {

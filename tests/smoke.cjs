@@ -11,6 +11,7 @@ const { execFileSync } = require('child_process');
 const ROOT = path.resolve(__dirname, '..');
 const FIX = path.join(__dirname, 'fixtures', 'test.webm');
 const TYPES = {
+  '.woff2': 'font/woff2',
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.css': 'text/css',
@@ -479,6 +480,7 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     for (const [name, w, h] of [
       ['tablet vertical', 800, 1280],
       ['celular', 390, 844],
+      ['celular angosto', 360, 740],
       ['tablet horizontal', 1280, 800],
     ]) {
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true });
@@ -519,6 +521,9 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
               if (!hit) out.push('insignia de transición');
               continue;
             }
+            // Texto que no cabe en su botón (se ve cortado)
+            if (e.tagName === 'BUTTON' && e.scrollWidth > e.clientWidth + 1)
+              out.push((e.getAttribute('aria-label') || e.textContent).trim().slice(0, 20) + ' (texto cortado)');
             if (b.height < 43.5 || (b.width < 43.5 && e.type !== 'range'))
               out.push(
                 (e.getAttribute('aria-label') || e.textContent || e.tagName).trim().slice(0, 20) +
@@ -1386,8 +1391,7 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     // El service worker precarga todos los archivos de la app
     const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
     const appFiles = [
-      ...fs.readdirSync(path.join(ROOT, 'js')).map(f => 'js/' + f),
-      'css/styles.css',
+      ...['js', 'css', 'fonts'].flatMap(d => fs.readdirSync(path.join(ROOT, d)).map(f => d + '/' + f)),
       'index.html',
       'manifest.webmanifest',
       ...man.icons.map(i => i.src),
@@ -1402,6 +1406,11 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     const errs = [];
     page.on('pageerror', e => errs.push(e.message));
     page.on('console', m => m.type() === 'error' && errs.push(m.text()));
+    const external = new Set();
+    page.on('request', r => {
+      const u = new URL(r.url());
+      if (/^https?:$/.test(u.protocol) && u.host !== new URL(url).host) external.add(u.host);
+    });
     await page.goto(url);
     await until(page, async () => {
       const { S } = await import('/js/state.js');
@@ -1411,6 +1420,11 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       (await until(page, () => !!navigator.serviceWorker.controller || !!window.__swReady, null, 3000)) ||
       (await page.reload(), await until(page, () => !!navigator.serviceWorker.controller, null, 10000));
     check(ctl, 'el service worker queda activo y controla la página');
+    check(
+      !external.size,
+      'la app no se conecta a ningún servicio externo (fuentes incluidas)' +
+        (external.size ? ': ' + [...external].join(', ') : '')
+    );
     // Sin conexión: recargar sigue funcionando (la app, sus módulos y el proyecto guardado)
     await ctx.setOffline(true);
     await page.reload();
