@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.rvix10.rastro",
+      "sha256_cert_fingerprints": [
+        "REEMPLAZAR:CON:LA:HUELLA:SHA256:DE:LA:LLAVE:DE:FIRMA:DE:GOOGLE:PLAY",
+        "REEMPLAZAR:CON:LA:HUELLA:SHA256:DE:TU:LLAVE:DE:SUBIDA"
+      ]
+    }
+  }
+]

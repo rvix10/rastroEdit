@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#111318">
+<title>Privacidad · Rastro Editor</title>
+<meta name="description" content="Política de privacidad de Rastro Editor: tus videos se procesan en tu dispositivo y no se envían a ningún servidor.">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="stylesheet" href="css/fonts.css">
+<style>
+  :root {
+    --bg: #111318;
+    --panel: #181b22;
+    --line: #2c313d;
+    --fg: #e9ebf1;
+    --muted: #8c93a3;
+    --accent: #f1a93b;
+  }
+  html { background: var(--bg); }
+  body {
+    margin: 0 auto;
+    max-width: 720px;
+    padding: 32px 16px 64px;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 Manrope, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  h1 { font: 800 28px/1.2 Unbounded, Manrope, system-ui, sans-serif; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 32px 0 8px; }
+  p, li { color: var(--fg); }
+  .muted { color: var(--muted); font-size: 14px; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 14px 16px; }
+  a { color: var(--accent); }
+  ul { padding-left: 22px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Política de privacidad</h1>
+  <p class="muted">Rastro Editor · Vigente desde el 3 de noviembre de 2026</p>
+
+  <div class="box">
+    <p><b>En resumen:</b> Rastro edita tus videos en tu propio dispositivo. Tus videos, tu música y tus proyectos
+    no se suben a ningún servidor, no hay cuentas, publicidad ni analítica, y no compartimos datos con nadie.</p>
+  </div>
+
+  <h2>Qué datos usa la app y dónde quedan</h2>
+  <ul>
+    <li><b>Videos y música que eliges.</b> Solo se abren los archivos que tú seleccionas. Se procesan (reproducción,
+      rastreo de movimiento, exportación) en tu dispositivo.</li>
+    <li><b>Tus proyectos.</b> Se guardan en el almacenamiento del navegador de tu dispositivo (IndexedDB), junto con
+      una copia de los videos y la música que usan, para que puedas seguir editando después.</li>
+    <li><b>Videos exportados.</b> Mientras se exportan se escriben en el almacenamiento privado del navegador y luego
+      se guardan donde tú elijas (por ejemplo, Descargas). La copia temporal se borra sola.</li>
+    <li><b>Preferencias.</b> Detalles como la resolución de exportación elegida o si ya viste la bienvenida se guardan
+      en tu dispositivo.</li>
+  </ul>
+  <p>Nada de esto sale de tu dispositivo, salvo que tú decidas compartirlo (por ejemplo, al guardar un archivo
+  <code>.rastro</code> o un video y enviarlo).</p>
+
+  <h2>Lo que la app no hace</h2>
+  <ul>
+    <li>No pide cuenta ni datos personales.</li>
+    <li>No envía tus videos, tu música ni tus proyectos a ningún servidor.</li>
+    <li>No usa publicidad, analítica ni rastreadores, y no se conecta a servicios de terceros.</li>
+    <li>No accede a tu cámara, micrófono, ubicación ni contactos.</li>
+  </ul>
+
+  <h2>Alojamiento</h2>
+  <p>La app se descarga desde GitHub Pages. Como en cualquier sitio web, GitHub puede registrar datos técnicos de
+  acceso (por ejemplo, la dirección IP y el tipo de navegador) para operar y proteger su servicio, según la
+  <a href="https://docs.github.com/es/site-policy/privacy-policies/github-general-privacy-statement">declaración de privacidad de GitHub</a>.
+  Una vez cargada, la app funciona sin conexión.</p>
+
+  <h2>Cómo borrar tus datos</h2>
+  <ul>
+    <li>En la app: <b>Proyectos</b> → el botón de eliminar de cada proyecto (también borra los videos que solo usaba ese proyecto).</li>
+    <li>En Android: desinstalar la app o borrar los datos del sitio en los ajustes de Chrome elimina todo lo guardado.</li>
+  </ul>
+
+  <h2>Niños</h2>
+  <p>La app no recopila datos de nadie, incluidos menores de edad.</p>
+
+  <h2>Cambios</h2>
+  <p>Si esta política cambia, la nueva versión se publicará en esta misma página con su fecha.</p>
+
+  <h2>Contacto</h2>
+  <p>Para preguntas sobre privacidad, escribe al correo de soporte que aparece en la ficha de la app en Google Play.</p>
+
+  <p class="muted"><a href="./">Volver a Rastro Editor</a></p>
+</main>
+</body>
+</html>

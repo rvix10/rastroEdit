@@ -251,11 +251,11 @@ export function renderFrame(T) {
       // Proyecto vacío: qué hacer, en vez de una pantalla negra
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#e9ebf1';
-      ctx.font = `800 ${Math.round(S.H * 0.05)}px Manrope, system-ui, sans-serif`;
+      ctx.fillStyle = '#f5f1e8';
+      ctx.font = `700 ${Math.round(S.H * 0.05)}px 'Space Grotesk', Manrope, system-ui, sans-serif`;
       ctx.fillText('Importa tus videos para empezar', S.W / 2, S.H / 2 - S.H * 0.03);
-      ctx.fillStyle = '#8c93a3';
-      ctx.font = `600 ${Math.round(S.H * 0.032)}px Manrope, system-ui, sans-serif`;
+      ctx.fillStyle = '#ffd84d';
+      ctx.font = `600 ${Math.round(S.H * 0.032)}px 'Space Grotesk', Manrope, system-ui, sans-serif`;
       ctx.fillText('Medios → Importar videos', S.W / 2, S.H / 2 + S.H * 0.045);
     }
     return;
@@ -284,7 +284,7 @@ export function drawGuides(T, act) {
   if (hit) {
     ctx.save();
     ctx.setLineDash([8, 6]);
-    ctx.strokeStyle = '#f1a93b';
+    ctx.strokeStyle = '#ffd84d';
     ctx.lineWidth = 2;
     ctx.strokeRect(hit.x, hit.y, hit.w, hit.h);
     ctx.restore();
@@ -296,8 +296,8 @@ export function drawGuides(T, act) {
   if (S.showPath && c.track && c.track.pts.length > 1) {
     const two = c.track.pts[0].x2 != null;
     ctx.save();
-    ctx.strokeStyle = 'rgba(79,209,197,.9)';
-    ctx.fillStyle = '#4fd1c5';
+    ctx.strokeStyle = 'rgba(79,209,165,.9)';
+    ctx.fillStyle = '#4fd1a5';
     ctx.lineWidth = lw;
     for (const [kx, ky] of two
       ? [
@@ -325,7 +325,7 @@ export function drawGuides(T, act) {
     if (cur) {
       const m = mapSrc(c, cur.x, cur.y),
         b = coverOf(c).dw * (19 / 320);
-      ctx.strokeStyle = '#4fd1c5';
+      ctx.strokeStyle = '#4fd1a5';
       ctx.lineWidth = lw;
       ctx.strokeRect(m.x - b / 2, m.y - b / 2, b, b);
       if (cur.x2 != null) {
@@ -345,8 +345,8 @@ export function drawGuides(T, act) {
       ? [S.pickFirst]
       : [c.track && c.track.seed, c.track && c.track.seed2].filter(Boolean);
   ctx.save();
-  ctx.strokeStyle = '#f1a93b';
-  ctx.fillStyle = '#f1a93b';
+  ctx.strokeStyle = '#ffd84d';
+  ctx.fillStyle = '#ffd84d';
   ctx.lineWidth = lw;
   ctx.font = `800 ${Math.round(S.H * 0.026)}px Manrope, system-ui, sans-serif`;
   marks.forEach((s, i) => {

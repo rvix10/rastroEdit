@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- La actividad solo lanza Chrome: tema transparente, sin barra de título -->
+    <style name="Theme.Rastro" parent="@android:style/Theme.Translucent.NoTitleBar" />
+</resources>

@@ -11,6 +11,7 @@ const { execFileSync } = require('child_process');
 const ROOT = path.resolve(__dirname, '..');
 const FIX = path.join(__dirname, 'fixtures', 'test.webm');
 const TYPES = {
+  '.woff2': 'font/woff2',
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.css': 'text/css',
@@ -479,6 +480,7 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     for (const [name, w, h] of [
       ['tablet vertical', 800, 1280],
       ['celular', 390, 844],
+      ['celular angosto', 360, 740],
       ['tablet horizontal', 1280, 800],
     ]) {
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true });
@@ -519,6 +521,9 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
               if (!hit) out.push('insignia de transición');
               continue;
             }
+            // Texto que no cabe en su botón (se ve cortado)
+            if (e.tagName === 'BUTTON' && e.scrollWidth > e.clientWidth + 1)
+              out.push((e.getAttribute('aria-label') || e.textContent).trim().slice(0, 20) + ' (texto cortado)');
             if (b.height < 43.5 || (b.width < 43.5 && e.type !== 'range'))
               out.push(
                 (e.getAttribute('aria-label') || e.textContent || e.tagName).trim().slice(0, 20) +
@@ -1205,12 +1210,19 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       'la primera vez se ve la bienvenida del proyecto de ejemplo'
     );
     const found = { contrast: new Set(), noname: new Set(), nokbd: new Set() };
-    for (const tab of ['media', 'edit', 'trans', 'track', 'text', 'export', 'projects']) {
-      await page.evaluate(async t => {
-        const { S } = await import('/js/state.js');
-        if (t === 'text') S.selOv = S.ovs[0].id;
-        (await import('/js/panel.js')).setTab(t);
-      }, tab);
+    // Las 7 pestañas en los dos temas (claro y oscuro)
+    for (const [theme, tab] of ['light', 'dark'].flatMap(th =>
+      ['media', 'edit', 'trans', 'track', 'text', 'export', 'projects'].map(t => [th, t])
+    )) {
+      await page.evaluate(
+        async ([th, t]) => {
+          (await import('/js/theme.js')).setTheme(th);
+          const { S } = await import('/js/state.js');
+          if (t === 'text') S.selOv = S.ovs[0].id;
+          (await import('/js/panel.js')).setTab(t);
+        },
+        [theme, tab]
+      );
       await page.waitForTimeout(200);
       const r = await page.evaluate(() => {
         const rgb = s => (s.match(/[\d.]+/g) || [0, 0, 0]).map(Number);
@@ -1271,11 +1283,44 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
         }
         return out;
       });
-      for (const k of Object.keys(found)) r[k].forEach(x => found[k].add(x + ` [${tab}]`));
+      for (const k of Object.keys(found)) r[k].forEach(x => found[k].add(x + ` [${tab}, ${theme}]`));
+    }
+    await page.evaluate(async () => (await import('/js/theme.js')).setTheme('auto'));
+    // Tema: el botón del encabezado alterna claro/oscuro, se recuerda al recargar y cambia el color de la barra
+    {
+      const st = () =>
+        page.evaluate(() => ({
+          theme: document.documentElement.dataset.theme || 'auto',
+          pressed: document.getElementById('bTheme').getAttribute('aria-pressed'),
+          bg: getComputedStyle(document.body).backgroundColor,
+          meta: document.querySelector('meta[name="theme-color"]').content,
+        }));
+      const a = await st();
+      await page.click('#bTheme');
+      const b = await st();
+      await page.reload();
+      await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+      const c = await st();
+      await page.click('#bTheme');
+      const d = await st();
+      check(
+        a.theme === 'auto' &&
+          a.pressed === 'false' &&
+          b.theme === 'dark' &&
+          b.pressed === 'true' &&
+          b.bg !== a.bg &&
+          b.meta !== a.meta &&
+          c.theme === 'dark' &&
+          c.bg === b.bg &&
+          d.theme === 'light' &&
+          d.bg === a.bg,
+        `botón de tema: claro → oscuro, se recuerda al recargar y vuelve (${a.theme}→${b.theme}→${c.theme}→${d.theme})`
+      );
+      await page.evaluate(async () => (await import('/js/theme.js')).setTheme('auto'));
     }
     check(
       !found.contrast.size,
-      'contraste de texto WCAG AA en las 7 pestañas' +
+      'contraste de texto WCAG AA en las 7 pestañas, en tema claro y oscuro' +
         (found.contrast.size ? ': ' + [...found.contrast].slice(0, 5).join(' · ') : '')
     );
     check(
@@ -1386,8 +1431,7 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     // El service worker precarga todos los archivos de la app
     const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
     const appFiles = [
-      ...fs.readdirSync(path.join(ROOT, 'js')).map(f => 'js/' + f),
-      'css/styles.css',
+      ...['js', 'css', 'fonts'].flatMap(d => fs.readdirSync(path.join(ROOT, d)).map(f => d + '/' + f)),
       'index.html',
       'manifest.webmanifest',
       ...man.icons.map(i => i.src),
@@ -1402,6 +1446,11 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     const errs = [];
     page.on('pageerror', e => errs.push(e.message));
     page.on('console', m => m.type() === 'error' && errs.push(m.text()));
+    const external = new Set();
+    page.on('request', r => {
+      const u = new URL(r.url());
+      if (/^https?:$/.test(u.protocol) && u.host !== new URL(url).host) external.add(u.host);
+    });
     await page.goto(url);
     await until(page, async () => {
       const { S } = await import('/js/state.js');
@@ -1411,6 +1460,11 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       (await until(page, () => !!navigator.serviceWorker.controller || !!window.__swReady, null, 3000)) ||
       (await page.reload(), await until(page, () => !!navigator.serviceWorker.controller, null, 10000));
     check(ctl, 'el service worker queda activo y controla la página');
+    check(
+      !external.size,
+      'la app no se conecta a ningún servicio externo (fuentes incluidas)' +
+        (external.size ? ': ' + [...external].join(', ') : '')
+    );
     // Sin conexión: recargar sigue funcionando (la app, sus módulos y el proyecto guardado)
     await ctx.setOffline(true);
     await page.reload();

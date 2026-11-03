@@ -11,6 +11,7 @@ import { renderTimeline } from './timeline-ui.js';
 import { zoomAt } from './timeline-touch.js';
 import { importMusic, attachMusic, MUSIC_ACCEPT } from './music.js';
 import { promptInstall } from './pwa.js';
+import { setTheme, toggleTheme } from './theme.js';
 import { deviceInfo, codecSupport, benchmark, reportText } from './diag.js';
 import {
   P,
@@ -151,7 +152,7 @@ export function act(a, el) {
   const [k, arg] = a.split(/:(.+)/);
   const c = getSel(),
     o = getOv();
-  if (S.exporting && k !== 'cancelExport') return;
+  if (S.exporting && !['cancelExport', 'theme', 'themeSet'].includes(k)) return;
   switch (k) {
     case 'selclip':
       selClip(arg);
@@ -404,6 +405,12 @@ export function act(a, el) {
       break;
     case 'install':
       promptInstall();
+      break;
+    case 'theme':
+      toggleTheme();
+      break;
+    case 'themeSet':
+      setTheme(arg);
       break;
     case 'diagRun':
     case 'benchRun':

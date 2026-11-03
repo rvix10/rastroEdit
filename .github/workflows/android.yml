@@ -1,0 +1,64 @@
+# Compila la app de Android (Trusted Web Activity) que se publica en Google Play.
+# Sin secretos: compila sin firmar (para revisar que todo esté bien) y deja un APK de prueba.
+# Con los secretos RASTRO_KEYSTORE_B64, RASTRO_KEYSTORE_PASSWORD, RASTRO_KEY_ALIAS y RASTRO_KEY_PASSWORD:
+# además firma el .aab para subir a Play y muestra la huella SHA-256 que va en assetlinks.json.
+name: Android (Play Store)
+
+on:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Llave de firma (si están los secretos)
+        env:
+          KS_B64: ${{ secrets.RASTRO_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+            echo "RASTRO_KEYSTORE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+            echo "Se firmará la versión de publicación."
+          else
+            echo "::notice::Sin llave de firma: se compila sin firmar, solo para revisar. Ver android/README.md."
+          fi
+
+      - name: Compilar (APK de prueba, APK y AAB de publicación)
+        env:
+          RASTRO_KEYSTORE_PASSWORD: ${{ secrets.RASTRO_KEYSTORE_PASSWORD }}
+          RASTRO_KEY_ALIAS: ${{ secrets.RASTRO_KEY_ALIAS }}
+          RASTRO_KEY_PASSWORD: ${{ secrets.RASTRO_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease
+
+      - name: Huella de la llave de subida (para assetlinks.json)
+        if: env.RASTRO_KEYSTORE != ''
+        env:
+          RASTRO_KEYSTORE_PASSWORD: ${{ secrets.RASTRO_KEYSTORE_PASSWORD }}
+          RASTRO_KEY_ALIAS: ${{ secrets.RASTRO_KEY_ALIAS }}
+        run: keytool -list -v -keystore "$RASTRO_KEYSTORE" -storepass:env RASTRO_KEYSTORE_PASSWORD -alias "$RASTRO_KEY_ALIAS" | grep -E 'SHA256:'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rastro-android
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error

@@ -74,20 +74,17 @@ export function makeMini() {
     m.width = 96;
     m.height = 54;
     const g = m.getContext('2d');
-    const gr = g.createLinearGradient(0, 0, 96, 54);
-    gr.addColorStop(0, c1);
-    gr.addColorStop(1, c2);
-    g.fillStyle = gr;
+    g.fillStyle = c1;
     g.fillRect(0, 0, 96, 54);
-    g.fillStyle = 'rgba(255,255,255,.92)';
-    g.font = '800 22px Unbounded, Manrope, sans-serif';
+    g.fillStyle = c2;
+    g.font = "700 24px 'Space Grotesk', Manrope, sans-serif";
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillText(txt, 48, 29);
     return m;
   };
-  mini.A = mk('#3b4f86', '#1b2440', 'A');
-  mini.B = mk('#f1a93b', '#c0532f', 'B');
+  mini.A = mk('#3d5afe', '#ffffff', 'A');
+  mini.B = mk('#ffd84d', '#121212', 'B');
 }
 export function drawMinis(now) {
   if (S.tab !== 'trans') return;

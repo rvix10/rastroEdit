@@ -62,9 +62,13 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `project.js` | Serializar, autoguardar, abrir/crear/eliminar, deshacer/rehacer (`P`), `collectMedia()`, archivo `.rastro` |
 | `archive.js` | Zip mínimo sin dependencias (`zip`/`unzip`): escribe sin comprimir, lee por rebanadas, sin ZIP64 (máx. 4 GB) |
 | `pwa.js` | App instalable: registra `sw.js`, guarda el aviso de instalación (`S.pwa`), `promptInstall()`, `isStandalone()` |
+| `theme.js` | Apariencia: automática (sistema), clara u oscura (`setTheme`, `toggleTheme`); `data-theme` en `<html>`, preferencia en `localStorage` |
 | `diag.js` | Diagnóstico (Proyectos → Este dispositivo): hardware, códecs por hardware/software, medición en «× tiempo real», informe |
 
-Fuera de `js/`: `sw.js` (service worker: la app funciona sin conexión), `manifest.webmanifest` e `icons/`.
+Fuera de `js/`: `sw.js` (service worker: la app funciona sin conexión), `manifest.webmanifest`, `icons/`,
+`css/fonts.css` + `fonts/` (fuentes incluidas: la app no se conecta a servicios externos), `privacy.html`
+(política de privacidad), `android/` (app de Google Play: Trusted Web Activity; guía en `android/README.md`,
+compila `.github/workflows/android.yml`) y `store/` (ficha de Play y material gráfico: `node store/generar.cjs`).
 
 ## Convenciones
 
@@ -119,12 +123,24 @@ Fuera de `js/`: `sw.js` (service worker: la app funciona sin conexión), `manife
   Sube `CACHE` solo si cambia la forma de guardar; con red primero, una versión nueva nunca queda vieja.
 - UI con `data-act="accion:arg"`, `data-tab`, `data-k` (inputs). No usar `alert/confirm/prompt`: confirmaciones dentro de la página.
 - Textos de la interfaz en español, directos, desde el lado del usuario. Toast tras acciones ("Clip dividido", "Proyecto eliminado").
-- Colores siempre desde los tokens de `:root` en `css/styles.css`. Debe funcionar a 390 px de ancho sin scroll horizontal.
+- Estilo visual: bordes gruesos (`2px solid var(--edge)`), sombras planas desplazadas (`--sh`, `--sh-lg`), botones en píldora
+  y colores vivos (azul `--accent`, limón `--hi`, menta `--trk`, coral `--ov`). Fuente de la interfaz: Space Grotesk; Manrope,
+  Unbounded y Caveat son solo para los textos del video.
+- Temas: claro por defecto; el oscuro redefine los tokens en `@media (prefers-color-scheme: dark)` (si no hay `data-theme="light"`)
+  y en `:root[data-theme="dark"]`. Si agregas un token, defínelo en los tres bloques. Texto sobre limón/menta/coral usa `--ink`
+  (oscuro en ambos temas). Lo dibujado en el lienzo (vista previa) no depende del tema. La sección `acceso` revisa el contraste en los dos.
+- Colores siempre desde los tokens de `:root` en `css/styles.css`. Debe funcionar a 360 px de ancho sin scroll horizontal
+  ni texto cortado dentro de los botones (la sección `tablet` de la prueba revisa 360 px).
 - Pantallas táctiles: dentro de `@media (pointer: coarse)` todo lo tocable mide al menos 44 px (al final de `styles.css`);
   en PC con mouse el diseño sigue compacto. Si agregas un control, súmalo ahí (la sección `tablet` de la prueba lo revisa).
   Algo que deba verse chico (insignias de transición) usa un `::before` invisible de 44×44 como área táctil.
 - Vertical (< 900 px de ancho y ≥ 600 px de alto): la página no se desplaza; vista previa y línea de tiempo quedan fijas
   y solo `#panel` tiene scroll. Más bajo que eso (celular acostado) vuelve al scroll normal.
+- Sin servicios externos: nada de CDNs ni fuentes remotas (la sección `pwa` de la prueba lo revisa). Es lo que permite
+  declarar en Play que la app no recopila ni comparte datos.
+- Android: la app de Play abre la web publicada (no copia sus archivos), así que publicar en `main` la actualiza.
+  Solo hace falta subir un AAB nuevo si cambia algo en `android/`. No se puede compilar aquí (sin SDK de Android):
+  lo hace GitHub Actions; los registros se leen con las herramientas de GitHub.
 - Sin dependencias ni paso de build salvo que se acuerde.
 
 ## Pendiente (en orden propuesto)
