@@ -151,41 +151,55 @@ export function renderPanel() {
         cls = 'run';
       } else if (n > 1) {
         st =
-          `Rastreo listo · ${tr.seed2 ? '2 puntos, con giro y escala' : '1 punto'} · de ${fmtS(tr.pts[0].t)} a ${fmtS(tr.pts[n - 1].t)}` +
-          (tr.lost ? ' · se perdió el objeto en un tramo' : '');
+          `Rastreo listo · ${tr.quad ? '4 esquinas, con perspectiva' : tr.seed2 ? '2 puntos, con giro y escala' : '1 punto'} · de ${fmtS(tr.pts[0].t)} a ${fmtS(tr.pts[n - 1].t)}` +
+          (tr.lost ? (tr.quad ? ' · se perdió el área en un tramo' : ' · se perdió el objeto en un tramo') : '');
         cls = tr.lost ? 'warn' : 'ok';
       } else if (tr && tr.seed) {
-        st = (tr.seed2 ? 'Puntos marcados' : 'Punto marcado') + ' en ' + fmtS(tr.seed.t) + '. Toca Rastrear.';
+        st =
+          (tr.quad ? 'Esquinas marcadas' : tr.seed2 ? 'Puntos marcados' : 'Punto marcado') +
+          ' en ' +
+          fmtS(tr.seed.t) +
+          '. Toca Rastrear.';
         cls = 'run';
       } else {
         st = 'Este clip no tiene rastreo.';
         cls = '';
       }
-      const two = S.trackPts === 2;
+      const two = S.trackPts === 2,
+        four = S.trackPts === 4,
+        nq = S.pickQuad && S.pickQuad.clipId === c.id ? S.pickQuad.pts.length : 0;
       const pickLbl = !S.pick
-        ? two
-          ? 'Marcar 2 puntos'
-          : 'Marcar punto'
-        : two
-          ? S.pickFirst
-            ? 'Toca el punto 2…'
-            : 'Toca el punto 1…'
-          : 'Toca la vista previa…';
+        ? four
+          ? 'Marcar 4 esquinas'
+          : two
+            ? 'Marcar 2 puntos'
+            : 'Marcar punto'
+        : four
+          ? `Toca la esquina ${nq + 1}…`
+          : two
+            ? S.pickFirst
+              ? 'Toca el punto 2…'
+              : 'Toca el punto 1…'
+            : 'Toca la vista previa…';
+      const quadDone = tr && tr.quad && n > 1 && !busy;
       h = `<h2>Rastreo de movimiento</h2><p class="sub">Clip: ${esc(c.name)}</p>
-    <div class="seg" role="group" aria-label="Puntos a rastrear">${[
+    <div class="seg" role="group" aria-label="Qué rastrear">${[
       [1, '1 punto'],
-      [2, '2 puntos · giro y escala'],
+      [2, '2 puntos'],
+      [4, '4 esquinas'],
     ]
       .map(
         ([k, n]) =>
           `<button data-act="trackPts:${k}" aria-pressed="${S.trackPts === k}" ${busy ? 'disabled' : ''}>${n}</button>`
       )
       .join('')}</div>
-    <ol class="steps"><li>Mueve el cursor a un cuadro donde el objeto se vea nítido.</li>${
-      two
-        ? '<li>Toca <b>Marcar 2 puntos</b> y luego dos detalles del mismo objeto, bien separados (por ejemplo, sus extremos).</li>'
-        : '<li>Toca <b>Marcar punto</b> y luego el objeto en la vista previa.</li>'
-    }<li>Toca <b>Rastrear</b>: analiza el clip hacia adelante y hacia atrás.</li></ol>
+    <ol class="steps"><li>${four ? 'Mueve el cursor a un cuadro donde el área se vea completa.' : 'Mueve el cursor a un cuadro donde el objeto se vea nítido.'}</li>${
+      four
+        ? '<li>Toca <b>Marcar 4 esquinas</b> y luego las esquinas del área (un terreno, una pantalla, un letrero), en cualquier orden.</li>'
+        : two
+          ? '<li>Toca <b>Marcar 2 puntos</b> y luego dos detalles del mismo objeto, bien separados (por ejemplo, sus extremos).</li>'
+          : '<li>Toca <b>Marcar punto</b> y luego el objeto en la vista previa.</li>'
+    }<li>Toca <b>Rastrear</b>: analiza el clip hacia adelante y hacia atrás.</li>${four ? '<li>Toca <b>Área con etiqueta</b> para pintarla y ponerle nombre.</li>' : ''}</ol>
     <div class="stat ${cls}" id="trkStat">${st}</div>
     <div class="prog" ${busy ? '' : 'hidden'}><i id="progBar" style="width:${S.trackProg * 100}%"></i></div>
     <div class="grid2">
@@ -193,11 +207,14 @@ export function renderPanel() {
       ${busy ? '<button data-act="cancelTrack">Detener</button>' : `<button class="primary" data-act="track" ${tr && tr.seed ? '' : 'disabled'}>Rastrear</button>`}
       <button data-act="followText" ${n > 1 && !busy ? '' : 'disabled'}>Texto que sigue</button>
       <button data-act="clearTrack" ${tr && !busy ? '' : 'disabled'}>Borrar rastreo</button></div>
+    ${four || (tr && tr.quad) ? `<button class="${quadDone ? 'primary' : ''}" data-act="addArea" ${quadDone ? '' : 'disabled'}>Área con etiqueta</button>` : ''}
     <label class="chk"><input type="checkbox" id="k-path" data-k="path" ${S.showPath ? 'checked' : ''}> Mostrar trayectoria en la vista previa</label>
     <p class="note">${
-      two
-        ? 'Con 2 puntos, los textos y stickers que siguen al objeto también giran y cambian de tamaño con él. Elige detalles con buen contraste y que no se tapen.'
-        : 'Rastreo 2D por punto: funciona mejor con objetos de buen contraste y textura.'
+      four
+        ? 'Con 4 esquinas se sigue el plano entero en perspectiva, aunque la cámara gire, se incline o se acerque. Las esquinas pueden quedar tapadas: lo que cuenta es la textura de adentro (tierra, pasto, la imagen de una pantalla).'
+        : two
+          ? 'Con 2 puntos, los textos y stickers que siguen al objeto también giran y cambian de tamaño con él. Elige detalles con buen contraste y que no se tapen.'
+          : 'Rastreo 2D por punto: funciona mejor con objetos de buen contraste y textura.'
     } Si el objeto sale de cuadro o queda tapado, el rastreo se detiene en ese tramo.</p>`;
     }
   } else if (S.tab === 'text') {
@@ -205,7 +222,12 @@ export function renderPanel() {
     else {
       const list = S.ovs.filter(x => x.clipId === c.id),
         has = c.track && c.track.pts.length > 1;
-      const nm = x => (x.kind === 'ring' ? 'Aro' : x.kind === 'sticker' ? x.text : x.text.split('\n')[0] || 'Texto');
+      const nm = x =>
+        x.kind === 'ring'
+          ? 'Aro'
+          : x.kind === 'sticker'
+            ? x.text
+            : x.text.split('\n')[0] || (x.kind === 'area' ? 'Área' : 'Texto');
       h = `<h2>Texto y stickers</h2><p class="sub">En: ${esc(c.name)}</p>
     <div class="grid2"><button data-act="addText">+ Texto</button><button data-act="addRing">+ Aro de enfoque</button></div>
     <div class="emojis" aria-label="Agregar sticker">${STICKERS.map(s => `<button data-act="addSticker:${s}" aria-label="Sticker ${s}">${s}</button>`).join('')}</div>
@@ -216,7 +238,7 @@ export function renderPanel() {
         ? `<div class="editor">
       ${o.kind !== 'ring' ? `<div class="lbl">Contenido</div><textarea id="k-ovtext" data-k="ovtext" rows="2">${esc(o.text)}</textarea>` : ''}
       ${
-        o.kind === 'text'
+        o.kind === 'text' || o.kind === 'area'
           ? `<div class="lbl">Tipografía</div><div class="seg">${[
               ['impacto', 'Impacto'],
               ['limpia', 'Limpia'],
@@ -234,11 +256,11 @@ export function renderPanel() {
       }
       ${o.kind !== 'sticker' ? `<div class="lbl">Color</div><div class="swatches">${COLORS.map(col => `<button class="sw" style="background:${col}" data-act="color:${col}" aria-pressed="${o.color === col}" aria-label="Color ${col}"></button>`).join('')}</div>` : ''}
       <div class="field"><span>Tamaño</span><input type="range" id="k-ovsize" data-k="ovsize" aria-label="Tamaño del elemento" min="0.025" max="0.3" step="0.005" value="${o.size}"><output id="o-ovsize">${Math.round(o.size * 100)}</output></div>
-      <label class="chk"><input type="checkbox" id="k-follow" data-k="follow" ${o.follow ? 'checked' : ''} ${has ? '' : 'disabled'}> Seguir el objeto rastreado${has ? '' : ' (primero rastrea este clip)'}</label>
+      ${o.kind === 'area' ? `<div class="field"><span>Relleno</span><input type="range" id="k-ovfill" data-k="ovfill" aria-label="Relleno del área" min="0" max="0.8" step="0.05" value="${o.fill ?? 0.3}"><output id="o-ovfill">${Math.round((o.fill ?? 0.3) * 100)} %</output></div>` : `<label class="chk"><input type="checkbox" id="k-follow" data-k="follow" ${o.follow ? 'checked' : ''} ${has ? '' : 'disabled'}> Seguir el objeto rastreado${has ? '' : ' (primero rastrea este clip)'}</label>`}
       ${
-        o.follow && has && c.track.seed2
-          ? `<label class="chk"><input type="checkbox" id="k-followRot" data-k="followRot" ${o.followRot !== false ? 'checked' : ''}> Girar con el objeto</label>
-      <label class="chk"><input type="checkbox" id="k-followScale" data-k="followScale" ${o.followScale !== false ? 'checked' : ''}> Cambiar de tamaño con el objeto</label>`
+        o.follow && has && (c.track.seed2 || c.track.quad)
+          ? `<label class="chk"><input type="checkbox" id="k-followRot" data-k="followRot" ${o.followRot !== false ? 'checked' : ''}> ${o.kind === 'area' ? 'Etiqueta: girar con el área' : 'Girar con el objeto'}</label>
+      <label class="chk"><input type="checkbox" id="k-followScale" data-k="followScale" ${o.followScale !== false ? 'checked' : ''}> ${o.kind === 'area' ? 'Etiqueta: cambiar de tamaño con el área' : 'Cambiar de tamaño con el objeto'}</label>`
           : ''
       }
       <div class="lbl">Visible</div><p class="note" id="ovRange">De ${fmtS(Math.max(o.t0, c.in) - c.in)} a ${fmtS(Math.min(o.t1, c.out) - c.in)} del clip</p>

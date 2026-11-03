@@ -40,6 +40,7 @@ const APP = [
   'js/mp4.js',
   'js/music.js',
   'js/panel.js',
+  'js/planar.js',
   'js/playback.js',
   'js/project.js',
   'js/pwa.js',

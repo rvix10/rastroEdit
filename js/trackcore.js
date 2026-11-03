@@ -5,8 +5,11 @@
       contra la plantilla original y una adaptativa. Con 2 puntos, la original se deforma con el giro y la
       escala previstos (si no, al girar el objeto deja de parecerse y el rastreo se desvía).
    3. Ajuste subpíxel con parábola. Si el puntaje cae, se predice unos cuadros (oclusiones cortas).
+   Con 4 esquinas se sigue el plano entero (homografía): ver planar.js.
    La coordinación (qué cuadros, en qué orden, guardar el resultado) está en tracker.js.
 */
+import { PlanarCore, quadCenter } from './planar.js';
+
 export const AW = 400; // ancho de análisis
 export const PR = 10; // radio del parche (21×21)
 export const SR = 24; // radio de búsqueda
@@ -49,11 +52,21 @@ export class TrackCore {
    * @param {number} AH alto de análisis
    * @param {Uint8ClampedArray} rgba0 cuadro de la semilla (AW×AH, RGBA)
    * @param {{x,y}[]} seeds 1 o 2 puntos, normalizados (0–1)
+   * @param {{x,y}[]} [quad] 4 esquinas normalizadas, en orden: rastreo planar
    */
-  constructor(AH, rgba0, seeds) {
+  constructor(AH, rgba0, seeds, quad) {
     this.AH = AH;
     this.grid = new Float32Array(W2 * W2);
     this.f0 = toGrayBlur(rgba0, AW, AH);
+    if (quad) {
+      this.planar = new PlanarCore(
+        AW,
+        AH,
+        this.f0,
+        quad.map(p => [p.x * AW, p.y * AH])
+      );
+      return;
+    }
     this.seeds = seeds.map(p => ({ x: p.x * AW, y: p.y * AH }));
     this.bases = this.seeds.map(p => {
       const b = this.patch(this.f0, p.x, p.y);
@@ -163,6 +176,7 @@ export class TrackCore {
 
   /** Empieza una pasada (hacia adelante o hacia atrás) desde la semilla. */
   begin() {
+    if (this.planar) return this.planar.begin();
     this.st = this.seeds.map((p, k) => ({
       x: p.x,
       y: p.y,
@@ -182,6 +196,13 @@ export class TrackCore {
       st = this.st,
       seeds = this.seeds;
     const f = toGrayBlur(rgba, AW, AH);
+    if (this.planar) {
+      // 4 esquinas: q normalizado; el punto es el cruce de las diagonales
+      const r = this.planar.step(f),
+        q = r.q.map((v, i) => (i % 2 ? v / AH : v / AW)),
+        [x, y] = quadCenter(q);
+      return { pts: [{ x, y, misses: r.misses }], q, stop: r.stop };
+    }
     const outside = (x, y) => x < PR || x > AW - PR - 1 || y < PR || y > AH - PR - 1;
     let stop = false;
     // Con 2 puntos: giro y escala previstos para este cuadro, para deformar las plantillas originales

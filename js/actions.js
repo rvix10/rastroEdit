@@ -12,6 +12,7 @@ import { zoomAt } from './timeline-touch.js';
 import { importMusic, attachMusic, MUSIC_ACCEPT } from './music.js';
 import { promptInstall } from './pwa.js';
 import { setTheme, toggleTheme } from './theme.js';
+import { orderQuad, quadCenter, quadArea, quadConvex } from './planar.js';
 import { deviceInfo, codecSupport, benchmark, reportText } from './diag.js';
 import {
   P,
@@ -60,8 +61,9 @@ export function selClip(id) {
   S.selOv = null;
   S.pick = false;
   S.pickFirst = null;
+  S.pickQuad = null;
   const c = getSel();
-  if (c && c.track && c.track.seed) S.trackPts = c.track.seed2 ? 2 : 1;
+  if (c && c.track && c.track.seed) S.trackPts = c.track.quad ? 4 : c.track.seed2 ? 2 : 1;
   renderTimeline();
   renderPanel();
 }
@@ -265,13 +267,15 @@ export function act(a, el) {
       play();
       break;
     case 'trackPts':
-      S.trackPts = arg === '2' ? 2 : 1;
+      S.trackPts = arg === '4' ? 4 : arg === '2' ? 2 : 1;
       S.pickFirst = null;
+      S.pickQuad = null;
       renderPanel();
       break;
     case 'pick':
       S.pick = !S.pick;
       S.pickFirst = null;
+      S.pickQuad = null;
       if (S.pick) {
         pause();
         if (!activeAt(S.T).includes(c)) seek(c._start + Math.min(0.5, c._len / 2));
@@ -287,6 +291,9 @@ export function act(a, el) {
     case 'clearTrack':
       c.track = null;
       S.pickFirst = null;
+      S.pickQuad = null;
+      S.ovs = S.ovs.filter(x => !(x.clipId === c.id && x.kind === 'area')); // sin plano no hay área
+      if (S.selOv && !S.ovs.some(x => x.id === S.selOv)) S.selOv = null;
       S.ovs.forEach(x => {
         if (x.clipId === c.id && x.follow) {
           x.follow = false;
@@ -311,6 +318,23 @@ export function act(a, el) {
       break;
     case 'addText':
       addOv('text', { text: 'Escribe aquí', y: 0.78 });
+      break;
+    case 'addArea':
+      // Área del plano rastreado (terreno, cancha…) con su etiqueta en el centro
+      if (!c || !c.track || !c.track.quad || c.track.pts.length < 2) break;
+      addOv('area', {
+        text: 'Lote 1',
+        font: 'limpia',
+        style: 'box',
+        color: '#ffd84d',
+        size: 0.045,
+        fill: 0.3,
+        follow: true,
+        x: 0,
+        y: 0,
+        followRot: false,
+        followScale: false,
+      });
       break;
     case 'addRing': {
       const has = c && c.track && c.track.pts.length > 1;
@@ -587,6 +611,9 @@ panel.addEventListener('input', e => {
   } else if (k === 'ovsize' && o) {
     o.size = +v;
     $('#o-ovsize').textContent = Math.round(o.size * 100);
+  } else if (k === 'ovfill' && o) {
+    o.fill = +v;
+    $('#o-ovfill').textContent = Math.round(o.fill * 100) + ' %';
   }
 });
 
@@ -716,6 +743,39 @@ cv.addEventListener('pointerdown', e => {
     if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return;
     S.sel = c.id;
     const t = localOf(c, S.T);
+    // Rastreo de 4 esquinas: se juntan los 4 toques en el mismo cuadro
+    if (S.trackPts === 4) {
+      let pq = S.pickQuad;
+      if (!pq || pq.clipId !== c.id || Math.abs(pq.t - t) > 0.02) pq = S.pickQuad = { clipId: c.id, t, pts: [] };
+      const near = pq.pts.some(q => Math.hypot((nx - q.x) * c.sw, (ny - q.y) * c.sh) < Math.max(c.sw, c.sh) * 0.03);
+      if (near) {
+        toast('Esa esquina está muy cerca de otra: toca la siguiente');
+        return;
+      }
+      pq.pts.push({ x: nx, y: ny });
+      if (pq.pts.length < 4) {
+        renderPanel();
+        toast(`Esquina ${pq.pts.length} de 4. Toca la siguiente.`);
+        return;
+      }
+      const quad = orderQuad(pq.pts, c.sw, c.sh),
+        flat = quad.flatMap(p => [p.x * c.sw, p.y * c.sh]);
+      if (!quadConvex(flat, Math.sign(quadArea(flat)) || 1) || Math.abs(quadArea(flat)) < c.sw * c.sh * 0.004) {
+        S.pickQuad = { clipId: c.id, t, pts: [] };
+        renderPanel();
+        toast('Las 4 esquinas deben formar un área sin cruces. Vuelve a tocarlas.');
+        return;
+      }
+      const [cx, cy] = quadCenter(quad.flatMap(p => [p.x, p.y]));
+      c.track = { seed: { t, x: cx, y: cy }, quad, pts: [] };
+      S.pickQuad = null;
+      S.pick = false;
+      renderTimeline();
+      renderPanel();
+      commit();
+      toast('Esquinas marcadas. Ahora toca Rastrear.');
+      return;
+    }
     // Rastreo de 2 puntos: el primer toque queda pendiente hasta el segundo, en el mismo cuadro
     if (S.trackPts === 2) {
       const f = S.pickFirst;

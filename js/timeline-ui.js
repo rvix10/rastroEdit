@@ -60,7 +60,12 @@ export function renderTimeline() {
       lanes.push(0);
     }
     lanes[ln] = b + 0.05;
-    const nm = o.kind === 'ring' ? 'Aro' : o.kind === 'sticker' ? o.text : o.text.split('\n')[0] || 'Texto';
+    const nm =
+      o.kind === 'ring'
+        ? 'Aro'
+        : o.kind === 'sticker'
+          ? o.text
+          : o.text.split('\n')[0] || (o.kind === 'area' ? 'Área' : 'Texto');
     oh += `<div class="ovb${o.follow ? ' f' : ''}${o.id === S.selOv ? ' sel' : ''}" data-act="selov:${o.id}" tabindex="0" role="button" aria-label="Elemento ${esc(nm)}" style="left:${a * pps}px;width:${Math.max(18, (b - a) * pps)}px;top:${ln * 24}px">${esc(nm)}</div>`;
   }
   const ro = $('#rowOvs');
