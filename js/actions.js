@@ -1,8 +1,8 @@
 import { $, cv, panel, tlInner, tlScroll, S, nid, setAspect } from './state.js';
-import { fmtS, toast, getSel, getOv } from './util.js';
-import { coverOf, importFiles, cloneClip } from './clips.js';
+import { clamp, fmtS, toast, getSel, getOv } from './util.js';
+import { coverOf, mapSrc, importFiles, cloneClip } from './clips.js';
 import { layout, activeAt, localOf } from './timeline.js';
-import { ovPos, ovSetAbs } from './render.js';
+import { ovPos, ovSetAbs, editableMarks } from './render.js';
 import { play, pause, seek } from './playback.js';
 import { runTrack } from './tracker.js';
 import { startExport, cancelExport, saveResult, setExportOpt } from './export.js';
@@ -729,10 +729,100 @@ export const toCanvas = e => {
   const r = cv.getBoundingClientRect();
   return { x: ((e.clientX - r.left) / r.width) * S.W, y: ((e.clientY - r.top) / r.height) * S.H };
 };
+/* Arrastrar un punto ya marcado (pestaña Rastreo): ajustarlo sin volver a marcar todo */
+function markAt(p) {
+  if (S.tab !== 'track' || S.tracking) return null;
+  const c = getSel();
+  if (!c || !activeAt(S.T).includes(c)) return null;
+  const em = editableMarks(c, localOf(c, S.T));
+  // Marcando de nuevo: solo se arrastran los toques pendientes (tocar en otro lado marca)
+  if (!em.pts.length || (S.pick && !em.pending)) return null;
+  const r = (cv.width / (cv.getBoundingClientRect().width || 1)) * (matchMedia('(pointer: coarse)').matches ? 30 : 16);
+  let best = null,
+    bd = r;
+  em.pts.forEach(pt => {
+    const m = mapSrc(c, pt.x, pt.y),
+      d = Math.hypot(m.x - p.x, m.y - p.y);
+    if (d < bd) {
+      bd = d;
+      best = { c, pt, em };
+    }
+  });
+  return best;
+}
+const toSrc = (c, p) => {
+  const m = coverOf(c);
+  return { x: (p.x - m.dx) / m.dw, y: (p.y - m.dy) / m.dh };
+};
+function startMarkDrag(h, p, e) {
+  const { c, pt, em } = h,
+    tr = c.track,
+    n = toSrc(c, p);
+  pause();
+  // Los puntos son del cuadro de la semilla: se muestra ese cuadro mientras se ajustan
+  if (!em.pending && tr && Math.abs(localOf(c, S.T) - tr.seed.t) > 0.02) seek(c._start + tr.seed.t - c.in);
+  S.markDrag = {
+    c,
+    pt,
+    em,
+    ox: pt.x - n.x,
+    oy: pt.y - n.y,
+    orig: { x: pt.x, y: pt.y },
+    origQuad: tr && tr.quad ? tr.quad.map(q => ({ ...q })) : null,
+    moved: false,
+  };
+  cv.setPointerCapture(e.pointerId);
+}
+function moveMark(p) {
+  const d = S.markDrag,
+    n = toSrc(d.c, p);
+  d.pt.x = clamp(n.x + d.ox, 0, 1);
+  d.pt.y = clamp(n.y + d.oy, 0, 1);
+  if (Math.hypot((d.pt.x - d.orig.x) * d.c.sw, (d.pt.y - d.orig.y) * d.c.sh) > 1) d.moved = true;
+}
+function endMarkDrag() {
+  const d = S.markDrag;
+  S.markDrag = null;
+  if (!d.moved) return;
+  if (d.em.pending) return renderPanel(); // todavía no es parte del proyecto
+  const c = d.c,
+    tr = c.track;
+  if (tr.quad) {
+    const quad = orderQuad(tr.quad, c.sw, c.sh),
+      flat = quad.flatMap(q => [q.x * c.sw, q.y * c.sh]);
+    if (!quadConvex(flat, Math.sign(quadArea(flat)) || 1) || Math.abs(quadArea(flat)) < c.sw * c.sh * 0.004) {
+      tr.quad = d.origQuad;
+      toast('Así las esquinas se cruzan: quedaron como estaban');
+      return;
+    }
+    tr.quad = quad;
+    [tr.seed.x, tr.seed.y] = quadCenter(quad.flatMap(q => [q.x, q.y]));
+  } else if (
+    tr.seed2 &&
+    Math.hypot((tr.seed2.x - tr.seed.x) * c.sw, (tr.seed2.y - tr.seed.y) * c.sh) < Math.max(c.sw, c.sh) * 0.03
+  ) {
+    Object.assign(d.pt, d.orig);
+    toast('Los puntos quedaban muy juntos: volvió a donde estaba');
+    return;
+  }
+  if (tr.pts.length > 1) {
+    tr.stale = true; // el rastreo anterior queda hasta que se vuelva a rastrear
+    toast(tr.quad ? 'Esquina movida. Toca Rastrear para actualizar.' : 'Punto movido. Toca Rastrear para actualizar.');
+  } else toast(tr.quad ? 'Esquina ajustada' : 'Punto ajustado');
+  renderTimeline();
+  renderPanel();
+  commit();
+}
+
 cv.addEventListener('pointerdown', e => {
   if (S.exporting) return;
   const p = toCanvas(e);
   const act = activeAt(S.T);
+  const mk = markAt(p);
+  if (mk) {
+    startMarkDrag(mk, p, e);
+    return;
+  }
   if (S.pick) {
     let c = getSel();
     if (!act.includes(c)) c = act[act.length - 1];
@@ -773,7 +863,7 @@ cv.addEventListener('pointerdown', e => {
       renderTimeline();
       renderPanel();
       commit();
-      toast('Esquinas marcadas. Ahora toca Rastrear.');
+      toast('Esquinas marcadas. Puedes arrastrarlas para ajustarlas, o toca Rastrear.');
       return;
     }
     // Rastreo de 2 puntos: el primer toque queda pendiente hasta el segundo, en el mismo cuadro
@@ -796,7 +886,11 @@ cv.addEventListener('pointerdown', e => {
     renderTimeline();
     renderPanel();
     commit();
-    toast(c.track.seed2 ? 'Puntos marcados. Ahora toca Rastrear.' : 'Punto marcado. Ahora toca Rastrear.');
+    toast(
+      c.track.seed2
+        ? 'Puntos marcados. Puedes arrastrarlos para ajustarlos, o toca Rastrear.'
+        : 'Punto marcado. Puedes arrastrarlo para ajustarlo, o toca Rastrear.'
+    );
     return;
   }
   for (let i = S.hits.length - 1; i >= 0; i--) {
@@ -827,13 +921,19 @@ cv.addEventListener('pointerdown', e => {
   }
 });
 cv.addEventListener('pointermove', e => {
-  if (!S.drag) return;
+  if (S.markDrag) return moveMark(toCanvas(e));
+  if (!S.drag) {
+    // Con mouse: la mano indica que el punto se puede arrastrar
+    if (e.pointerType === 'mouse') cv.style.cursor = markAt(toCanvas(e)) ? 'grab' : '';
+    return;
+  }
   const p = toCanvas(e),
     d = S.drag;
   // En pantalla se mueve 1:1; si sigue al objeto, se guarda como desplazamiento en su cuadro de referencia
   ovSetAbs(d.o, d.c, d.local, d.ax + (p.x - d.px), d.ay + (p.y - d.py));
 });
 export const endDrag = () => {
+  if (S.markDrag) return endMarkDrag();
   if (S.drag) {
     S.drag = null;
     commit();

@@ -160,6 +160,9 @@ export function renderPanel() {
       if (busy) {
         st = 'Analizando… ' + Math.round(S.trackProg * 100) + '%';
         cls = 'run';
+      } else if (n > 1 && tr.stale) {
+        st = `Moviste ${tr.quad ? 'las esquinas' : 'los puntos'}: toca Rastrear para actualizar el rastreo.`;
+        cls = 'warn';
       } else if (n > 1) {
         st =
           `Rastreo listo · ${tr.quad ? '4 esquinas, con perspectiva' : tr.seed2 ? '2 puntos, con giro y escala' : '1 punto'} · de ${fmtS(tr.pts[0].t)} a ${fmtS(tr.pts[n - 1].t)}` +
@@ -210,7 +213,7 @@ export function renderPanel() {
         : two
           ? '<li>Toca <b>Marcar 2 puntos</b> y luego dos detalles del mismo objeto, bien separados (por ejemplo, sus extremos).</li>'
           : '<li>Toca <b>Marcar punto</b> y luego el objeto en la vista previa.</li>'
-    }<li>Toca <b>Rastrear</b>: analiza el clip hacia adelante y hacia atrás.</li>${four ? '<li>Toca <b>Área con etiqueta</b> para pintarla y ponerle nombre.</li>' : ''}</ol>
+    }<li>Si alguno quedó mal, arrástralo en la vista previa para ajustarlo.</li><li>Toca <b>Rastrear</b>: analiza el clip hacia adelante y hacia atrás.</li>${four ? '<li>Toca <b>Área con etiqueta</b> para pintarla y ponerle nombre.</li>' : ''}</ol>
     <div class="stat ${cls}" id="trkStat">${st}</div>
     <div class="prog" ${busy ? '' : 'hidden'}><i id="progBar" style="width:${S.trackProg * 100}%"></i></div>
     <div class="grid2">

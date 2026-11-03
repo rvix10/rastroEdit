@@ -257,6 +257,7 @@ export async function runTrack(c, silent) {
       return q;
     });
   c.track.lost = lost;
+  delete c.track.stale; // los puntos se habían movido después del último rastreo
   c.track.cancelled = S.trackCancel;
   if (c.el) c.el.muted = false;
   S.tracking = null;

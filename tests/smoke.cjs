@@ -1786,11 +1786,26 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     });
     const tap = p => page.mouse.click(box.x + (p.x / 1280) * box.w, box.y + (p.y / 720) * box.h);
     await tap(W(-45, -35, 1));
-    await tap(W(40, 30, 1));
+    const p2 = W(40, 30, 1),
+      bad = { x: p2.x + 35, y: p2.y - 25 };
+    await tap(bad);
     const marked = await page.evaluate(
       `(async () => { ${mods} const t = st.S.clips[0].track; return !!(t && t.seed && t.seed2) })()`
     );
     check(marked, 'marca 2 puntos con dos toques en la vista previa');
+    // El punto 2 quedó corrido: se arrastra a su lugar
+    {
+      const s2 = { x: box.x + (bad.x / 1280) * box.w, y: box.y + (bad.y / 720) * box.h },
+        e2 = { x: box.x + (p2.x / 1280) * box.w, y: box.y + (p2.y / 720) * box.h };
+      await page.mouse.move(s2.x, s2.y);
+      await page.mouse.down();
+      await page.mouse.move(e2.x, e2.y, { steps: 6 });
+      await page.mouse.up();
+      const q = await page.evaluate(
+        `(async () => { ${mods} const t = st.S.clips[0].track; return { x: t.seed2.x * 1280, y: t.seed2.y * 720 } })()`
+      );
+      check(Math.hypot(q.x - p2.x, q.y - p2.y) < 2, 'arrastrar el punto 2 lo ajusta antes de rastrear');
+    }
     await page.click('[data-act="track"]');
     await until(
       page,
@@ -1920,13 +1935,37 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       return { x: r.left, y: r.top, w: r.width, h: r.height };
     });
     const at1 = await page.evaluate(`(async () => { ${truthSrc} return truth(1); })()`);
-    // En desorden: el editor las ordena
-    for (const k of [2, 0, 3, 1])
-      await page.mouse.click(box.x + (at1[k][0] / 1280) * box.w, box.y + (at1[k][1] / 720) * box.h);
+    const scr = ([x, y]) => ({ x: box.x + (x / 1280) * box.w, y: box.y + (y / 720) * box.h });
+    // En desorden (el editor las ordena) y la de arriba a la derecha corrida a propósito 40 px
+    const wrong = [at1[1][0] - 40, at1[1][1] + 30];
+    for (const k of [2, 0, 3, 1]) {
+      const q = scr(k === 1 ? wrong : at1[k]);
+      await page.mouse.click(q.x, q.y);
+    }
     const marked = await page.evaluate(
       `(async () => { ${mods} const t = st.S.clips[0].track; return !!(t && t.quad && t.quad.length === 4 && !st.S.pick) })()`
     );
     check(marked, 'marca 4 esquinas con cuatro toques (en cualquier orden)');
+    // Arrastrar la esquina mal puesta hasta su lugar (con lupa mientras se arrastra)
+    {
+      const a = scr(wrong),
+        b = scr(at1[1]);
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 4 });
+      const dragging = await page.evaluate(`(async () => { ${mods} return !!st.S.markDrag })()`);
+      await page.mouse.move(b.x, b.y, { steps: 4 });
+      await page.mouse.up();
+      const r = await page.evaluate(
+        `(async () => { ${mods} const pl = await import('/js/planar.js'), t = st.S.clips[0].track, q = t.quad[1];
+          const [cx, cy] = pl.quadCenter(t.quad.flatMap(p => [p.x, p.y]));
+          return { x: q.x * 1280, y: q.y * 720, center: Math.hypot(cx - t.seed.x, cy - t.seed.y) < 1e-9 } })()`
+      );
+      check(
+        dragging && Math.hypot(r.x - at1[1][0], r.y - at1[1][1]) < 2 && r.center,
+        `arrastrar una esquina marcada la mueve a donde se suelta (error ${Math.hypot(r.x - at1[1][0], r.y - at1[1][1]).toFixed(1)} px)`
+      );
+    }
     const t0 = Date.now();
     await page.click('[data-act="track"]');
     await until(
@@ -1995,6 +2034,36 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
       );
       check(diff < 1e-9, 'mismo resultado sin Worker (en el hilo principal)');
       await p2.close();
+    }
+    // Mover una esquina después de rastrear: se avisa que hay que volver a rastrear, y al hacerlo se actualiza
+    {
+      await page.click('[data-tab="track"]');
+      await page.evaluate(
+        `(async () => { ${mods} const c = st.S.clips[0]; (await import('/js/playback.js')).seek(c._start + 1); })()`
+      );
+      await page.waitForTimeout(200);
+      const a = scr(at1[3]);
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      await page.mouse.move(a.x + 8, a.y + 6, { steps: 3 });
+      await page.mouse.up();
+      const st1 = await page.evaluate(
+        `(async () => { ${mods} return { stale: !!st.S.clips[0].track.stale, msg: document.querySelector('#trkStat').textContent } })()`
+      );
+      await page.click('[data-act="track"]');
+      await until(
+        page,
+        async () => {
+          const { S } = await import('/js/state.js');
+          return !S.tracking && !S.clips[0].track.stale;
+        },
+        null,
+        120000
+      );
+      check(
+        st1.stale && /Rastrear/.test(st1.msg),
+        'mover una esquina ya rastreada avisa que hay que volver a rastrear, y rastrear lo actualiza'
+      );
     }
     // Se guarda con el proyecto
     await page.evaluate(`(async () => { ${mods} await pj.saveNow(); })()`);

@@ -116,6 +116,10 @@ compila `.github/workflows/android.yml`) y `store/` (ficha de Play y material gr
   centros de los lados izquierdo y derecho, así los overlays que siguen funcionan igual que con 2 puntos. El overlay
   `kind: 'area'` (con `fill` 0–0,8) dibuja el plano relleno y su etiqueta en el centro; sin rastreo de 4 esquinas no se dibuja,
   y `clearTrack` lo quita. RANSAC usa `mulberry32` con semilla por cuadro: con y sin Worker el resultado es idéntico.
+- Ajustar puntos marcados: en la pestaña Rastreo, los puntos que devuelve `editableMarks(c, local)` (render.js) se arrastran
+  en la vista previa (`S.markDrag`, actions.js) con lupa ×3; mientras se marca, solo los toques pendientes. Al soltar se valida
+  (esquinas sin cruces, puntos no muy juntos; si no, vuelven a donde estaban) y se hace `commit()`. Si ya había rastreo, queda
+  `track.stale` (el panel pide volver a rastrear) y `runTrack` lo borra.
 - Rastreo: solo uno a la vez (`S.tracking`). El automático del ejemplo es silencioso (`S.trackSilent`) y cede el paso si
   la persona pide otro; quitar el clip que se rastrea pone `S.trackCancel`. El resultado debe ser idéntico con o sin Worker.
 - Accesibilidad: todo lo tocable que no sea `<button>`/`<input>` (clips, barras, listas) lleva `tabindex="0"`,
