@@ -15,7 +15,7 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 - Prueba de humo: `node tests/smoke.cjs` (o solo algunas secciones: `node tests/smoke.cjs tactil 2puntos`;
   secciones: basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, 4esquinas, vista, rotacion, demux) — carga, pestañas, 390 px, importar, rastreo (precisión), sincronía
   del reloj con el video, exportación rápida (cuadros exactos, ffprobe, pausa, cancelar, respaldo en tiempo real),
-  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo rápido (tiempo, sin trabas, mismo resultado sin Worker), accesibilidad y primer uso (contraste, nombres, teclado, avisos, bienvenida), app instalable (manifiesto, sin conexión, diagnóstico), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rastreo de 4 esquinas (plano en perspectiva contra la verdad, área, sin Worker, guardado), vista previa (cabe en cada pantalla y proporción, barra de tamaño con dedo, mouse y teclado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
+  objetivos táctiles de 44 px y diseño vertical, línea de tiempo táctil (gestos con mouse y dedos reales), audio (volumen por clip y música medidos en el archivo exportado), exportación en 720p/1080p/4K (tamaño real, misma composición, calidad, disco), rastreo rápido (tiempo, sin trabas, mismo resultado sin Worker), accesibilidad y primer uso (contraste, nombres, teclado, avisos, bienvenida), app instalable (manifiesto, sin conexión, diagnóstico), rastreo de 2 puntos (giro, escala, texto anclado, arrastre, guardado), rastreo de 4 esquinas (plano en perspectiva contra la verdad, área, sin Worker, guardado, temblor, cubrir tramo sin rastrear), vista previa (cabe en cada pantalla y proporción, barra de tamaño con dedo, mouse y teclado), rotación, demuxer contra ffprobe, archivo `.rastro` (también en un navegador sin datos) y limpieza de videos. Genera
   `tests/fixtures/test.webm` con ffmpeg si no existe. Correrla antes de cada push.
 - Pruebas de navegador: Playwright + Chromium (en el entorno de la nube ya vienen instalados: `require('playwright')`, sin `playwright install`).
   Levantar un servidor HTTP mínimo, abrir la página y revisar `pageerror` / errores de consola.
@@ -49,7 +49,7 @@ python3 -m http.server 8080   # abrir http://localhost:8080
 | `playback.js` | Bucle `requestAnimationFrame`; al reproducir, el reloj del proyecto sigue al `<video>` activo (`videoClock`) |
 | `tracker.js` | Coordina el rastreo: cuadros de análisis con `FrameSource` (hacia atrás, por tramos de 2 s decodificados en orden), pasadas adelante/atrás, suavizado y resultado |
 | `trackcore.js` | Cálculo del rastreo sin DOM (`TrackCore`): ZNCC, desenfoque, plantilla adaptativa, subpíxel; con 2 puntos, plantilla original deformada con el giro/escala previstos; con 4 esquinas delega en `PlanarCore` |
-| `planar.js` | Rastreo planar (4 esquinas) sin DOM: homografías (`hFit` DLT normalizado, `ransacH` con semilla fija), puntos con textura, paso cuadro a cuadro + corrección contra el cuadro de las esquinas; utilidades de cuadriláteros (`quadCenter`, `orderQuad`…) |
+| `planar.js` | Rastreo planar (4 esquinas) sin DOM: homografías (`hFit` DLT normalizado, `ransacH` con semilla fija); por cuadro: estimación gruesa ×4, paso fino cuadro a cuadro, verificación (amplia + fina) contra cuadros clave, prueba de unicidad, recuperación tras perderse; utilidades de cuadriláteros (`quadCenter`, `orderQuad`…) |
 | `track-worker.js` | Web Worker que corre `TrackCore` (si no hay Workers de módulo, `tracker.js` lo usa en el hilo principal) |
 | `export.js` | Elige cómo exportar: rápida (`fastexport.js`) o, si no hay WebCodecs o falla, `MediaRecorder` en tiempo real (`S.fastBroken`) |
 | `fastexport.js` | Exportación con WebCodecs: cuadro por cuadro (`renderFrame` + `VideoEncoder`) a 720p/1080p/4K (`exportSize`, `QUALITIES`), audio mezclado con `OfflineAudioContext` + `AudioEncoder`; escribe en disco (OPFS) |
@@ -116,6 +116,13 @@ compila `.github/workflows/android.yml`) y `store/` (ficha de Play y material gr
   centros de los lados izquierdo y derecho, así los overlays que siguen funcionan igual que con 2 puntos. El overlay
   `kind: 'area'` (con `fill` 0–0,8) dibuja el plano relleno y su etiqueta en el centro; sin rastreo de 4 esquinas no se dibuja,
   y `clearTrack` lo quita. RANSAC usa `mulberry32` con semilla por cuadro: con y sin Worker el resultado es idéntico.
+  Lo que no se pudo rastrear queda como hueco (`track.gaps`, en tiempo local; el panel lo muestra) y entre muestras se
+  interpola. «Cubrir tramo sin rastrear» marca las esquinas en un hueco y las guarda como cuadro clave extra
+  (`track.keys = [{seed, quad}]`): `runTrack(c, silent, { fill: key })` rastrea solo ese hueco y lo une; un `runTrack` normal
+  rastrea todo y después cada cuadro clave en su hueco. El suavizado final de 4 esquinas solo quita ruido de ~1 px.
+  Para medir cambios del rastreo planar: la sección `4esquinas` (perspectiva, temblor fuerte dibujado con verdad exacta,
+  salto que deja un tramo sin rastrear); el filtro `perspective` de ffmpeg sirve para movimientos lineales o saltos
+  (con `sin()` no coincide con la verdad calculada).
 - Ajustar puntos marcados: en la pestaña Rastreo, los puntos que devuelve `editableMarks(c, local)` (render.js) se arrastran
   en la vista previa (`S.markDrag`, actions.js) con lupa ×3; mientras se marca, solo los toques pendientes. Al soltar se valida
   (esquinas sin cruces, puntos no muy juntos; si no, vuelven a donde estaban) y se hace `commit()`. Si ya había rastreo, queda

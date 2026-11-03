@@ -24,6 +24,7 @@ export const S = {
   pickFirst: null, // rastreo de 2 puntos: primer toque, a la espera del segundo
   pickQuad: null, // rastreo de 4 esquinas: { clipId, t, pts } mientras se tocan
   markDrag: null, // punto marcado que se está arrastrando (actions.js)
+  pickFill: false, // 4 esquinas: se marcan en un tramo sin rastrear (cuadro clave extra)
   trackPts: 1, // 1, 2 o 4 (esquinas) al marcar
   showPath: true,
   tracking: null,

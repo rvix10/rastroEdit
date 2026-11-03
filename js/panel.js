@@ -166,7 +166,13 @@ export function renderPanel() {
       } else if (n > 1) {
         st =
           `Rastreo listo · ${tr.quad ? '4 esquinas, con perspectiva' : tr.seed2 ? '2 puntos, con giro y escala' : '1 punto'} · de ${fmtS(tr.pts[0].t)} a ${fmtS(tr.pts[n - 1].t)}` +
-          (tr.lost ? (tr.quad ? ' · se perdió el área en un tramo' : ' · se perdió el objeto en un tramo') : '');
+          (tr.lost
+            ? tr.gaps && tr.gaps.length
+              ? ` · sin rastrear: ${tr.gaps.map(([a, b]) => `${fmtS(a - c.in)}–${fmtS(b - c.in)}`).join(', ')}`
+              : tr.quad
+                ? ' · se perdió el área en un tramo'
+                : ' · se perdió el objeto en un tramo'
+            : '');
         cls = tr.lost ? 'warn' : 'ok';
       } else if (tr && tr.seed) {
         st =
@@ -182,19 +188,20 @@ export function renderPanel() {
       const two = S.trackPts === 2,
         four = S.trackPts === 4,
         nq = S.pickQuad && S.pickQuad.clipId === c.id ? S.pickQuad.pts.length : 0;
-      const pickLbl = !S.pick
-        ? four
-          ? 'Marcar 4 esquinas'
-          : two
-            ? 'Marcar 2 puntos'
-            : 'Marcar punto'
-        : four
-          ? `Toca la esquina ${nq + 1}…`
-          : two
-            ? S.pickFirst
-              ? 'Toca el punto 2…'
-              : 'Toca el punto 1…'
-            : 'Toca la vista previa…';
+      const pickLbl =
+        !S.pick || S.pickFill
+          ? four
+            ? 'Marcar 4 esquinas'
+            : two
+              ? 'Marcar 2 puntos'
+              : 'Marcar punto'
+          : four
+            ? `Toca la esquina ${nq + 1}…`
+            : two
+              ? S.pickFirst
+                ? 'Toca el punto 2…'
+                : 'Toca el punto 1…'
+              : 'Toca la vista previa…';
       const quadDone = tr && tr.quad && n > 1 && !busy;
       h = `<h2>Rastreo de movimiento</h2><p class="sub">Clip: ${esc(c.name)}</p>
     <div class="seg" role="group" aria-label="Qué rastrear">${[
@@ -217,10 +224,16 @@ export function renderPanel() {
     <div class="stat ${cls}" id="trkStat">${st}</div>
     <div class="prog" ${busy ? '' : 'hidden'}><i id="progBar" style="width:${S.trackProg * 100}%"></i></div>
     <div class="grid2">
-      <button data-act="pick" class="${S.pick ? 'on' : ''}" ${busy ? 'disabled' : ''}>${pickLbl}</button>
+      <button data-act="pick" class="${S.pick && !S.pickFill ? 'on' : ''}" ${busy ? 'disabled' : ''}>${pickLbl}</button>
       ${busy ? '<button data-act="cancelTrack">Detener</button>' : `<button class="primary" data-act="track" ${tr && tr.seed ? '' : 'disabled'}>Rastrear</button>`}
       <button data-act="followText" ${n > 1 && !busy ? '' : 'disabled'}>Texto que sigue</button>
       <button data-act="clearTrack" ${tr && !busy ? '' : 'disabled'}>Borrar rastreo</button></div>
+    ${
+      tr && tr.quad && tr.gaps && tr.gaps.length && n > 1 && !busy
+        ? `<button data-act="pickFill" class="${S.pickFill ? 'on' : ''}">${S.pickFill ? `Toca la esquina ${nq + 1}… (en el tramo sin rastrear)` : 'Cubrir tramo sin rastrear'}</button>
+    <p class="note">Va a un cuadro del tramo que faltó: marca ahí las 4 esquinas y se rastrea solo ese tramo, sin perder lo demás.</p>`
+        : ''
+    }
     ${four || (tr && tr.quad) ? `<button class="${quadDone ? 'primary' : ''}" data-act="addArea" ${quadDone ? '' : 'disabled'}>Área con etiqueta</button>` : ''}
     <label class="chk"><input type="checkbox" id="k-path" data-k="path" ${S.showPath ? 'checked' : ''}> Mostrar trayectoria en la vista previa</label>
     <p class="note">${

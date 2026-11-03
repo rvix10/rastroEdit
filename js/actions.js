@@ -4,7 +4,7 @@ import { coverOf, mapSrc, importFiles, cloneClip } from './clips.js';
 import { layout, activeAt, localOf } from './timeline.js';
 import { ovPos, ovSetAbs, editableMarks } from './render.js';
 import { play, pause, seek } from './playback.js';
-import { runTrack } from './tracker.js';
+import { runTrack, trackGaps } from './tracker.js';
 import { startExport, cancelExport, saveResult, setExportOpt } from './export.js';
 import { renderTabs, setTab, renderPanel, markWelcome } from './panel.js';
 import { renderTimeline } from './timeline-ui.js';
@@ -62,6 +62,7 @@ export function selClip(id) {
   S.pick = false;
   S.pickFirst = null;
   S.pickQuad = null;
+  S.pickFill = false;
   const c = getSel();
   if (c && c.track && c.track.seed) S.trackPts = c.track.quad ? 4 : c.track.seed2 ? 2 : 1;
   renderTimeline();
@@ -270,12 +271,14 @@ export function act(a, el) {
       S.trackPts = arg === '4' ? 4 : arg === '2' ? 2 : 1;
       S.pickFirst = null;
       S.pickQuad = null;
+      S.pickFill = false;
       renderPanel();
       break;
     case 'pick':
       S.pick = !S.pick;
       S.pickFirst = null;
       S.pickQuad = null;
+      S.pickFill = false;
       if (S.pick) {
         pause();
         if (!activeAt(S.T).includes(c)) seek(c._start + Math.min(0.5, c._len / 2));
@@ -285,6 +288,31 @@ export function act(a, el) {
     case 'track':
       runTrack(c);
       break;
+    case 'pickFill': {
+      // 4 esquinas: marcar en un tramo sin rastrear para cubrir solo ese tramo
+      if (!c || !c.track || !c.track.quad) break;
+      if (S.pickFill) {
+        S.pick = S.pickFill = false;
+        S.pickQuad = null;
+        renderPanel();
+        break;
+      }
+      const gaps = trackGaps(c, c.track.pts);
+      if (!gaps.length) break;
+      pause();
+      const local = activeAt(S.T).includes(c) ? localOf(c, S.T) : -1;
+      if (!gaps.some(([a, b]) => local > a && local < b)) {
+        const [a, b] = gaps[0];
+        seek(c._start + (a + b) / 2 - c.in);
+      }
+      S.trackPts = 4;
+      S.pick = true;
+      S.pickFill = true;
+      S.pickQuad = null;
+      renderPanel();
+      toast('Toca las 4 esquinas del área en este cuadro');
+      break;
+    }
     case 'cancelTrack':
       S.trackCancel = true;
       break;
@@ -857,6 +885,22 @@ cv.addEventListener('pointerdown', e => {
         return;
       }
       const [cx, cy] = quadCenter(quad.flatMap(p => [p.x, p.y]));
+      if (S.pickFill && c.track && c.track.quad && c.track.pts.length > 1) {
+        // Cuadro clave extra: se rastrea solo el tramo que faltaba y se une con lo que ya había
+        S.pickQuad = null;
+        S.pick = S.pickFill = false;
+        if (!trackGaps(c, c.track.pts).some(([a, b]) => t > a && t < b)) {
+          renderPanel();
+          toast('Ese cuadro ya está rastreado: mueve el cursor al tramo sin rastrear');
+          return;
+        }
+        const key = { seed: { t, x: cx, y: cy }, quad };
+        c.track.keys = [...(c.track.keys || []), key];
+        commit();
+        toast('Rastreando el tramo que faltaba…');
+        runTrack(c, false, { fill: key });
+        return;
+      }
       c.track = { seed: { t, x: cx, y: cy }, quad, pts: [] };
       S.pickQuad = null;
       S.pick = false;

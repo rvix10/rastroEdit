@@ -1,21 +1,37 @@
 /* ---------- rastreo planar (4 esquinas): sigue un plano en perspectiva (terreno, pantalla, letrero) ----------
    Sin DOM: lo usa trackcore.js (en el Worker o en el hilo principal) y render.js (para dibujar).
    Por cada cuadro:
+   0. Estimación gruesa en la imagen reducida ×4 (cubre movimientos grandes: giros rápidos, temblor), probando
+      «sigue el movimiento anterior» y «quieto»; la mejor guía la búsqueda fina.
    1. Cuadro a cuadro: puntos con textura dentro del área (en el cuadro anterior) se buscan en el actual con ZNCC
       alrededor de donde los pone el movimiento anterior. Con RANSAC se ajusta la homografía que los explica a todos
       (los que no encajan —árboles, sombras, algo que pasa— quedan fuera).
-   2. Corrección contra el cuadro de las esquinas: sus puntos, deformados con esa homografía, se buscan otra vez
-      cerca. Así el error no se acumula a lo largo del clip. Si no alcanza (vista muy distinta), queda el paso 1.
+   2. Verificación contra un cuadro clave (al principio, el de las esquinas): sus puntos, deformados con esa homografía,
+      se buscan otra vez cerca. Así el error no se acumula. Los cuadros verificados se guardan como nuevos cuadros clave
+      cada tanto, para seguir verificando aunque la vista cambie mucho (el dron gira alrededor del lote).
+      Sin verificar se aceptan como mucho unos cuadros seguidos; después cuenta como perdido (mejor un tramo
+      interpolado que un área corrida).
+   Cada punto debe ser único en su zona (prueba de unicidad): en surcos o hileras un punto "se desliza" a lo largo
+   de la línea y daría una posición falsa. Los puntos se reparten en toda el área (si no, la perspectiva de la parte
+   lejana queda mal determinada).
+   Si no se encuentra, se sigue buscando hasta ~3 s desde el último cuadro bueno (recupera tras un tirón o algo que tapa).
    Homografías: arreglos de 9 números (fila por fila), del cuadro de las esquinas al cuadro actual.
    RANSAC usa un generador con semilla fija: el resultado es idéntico en el Worker y en el hilo principal.
 */
 export const PPR = 8; // radio del parche (17×17)
-const SR1 = 14; // búsqueda cuadro a cuadro
-const SR2 = 4; // búsqueda contra el cuadro de las esquinas (con buena predicción)
-const SR2_WIDE = 10; // … si el paso 1 no funcionó
+const SR1 = 14; // búsqueda cuadro a cuadro (sin estimación gruesa)
+const SR1_FINE = 6; // … guiada por la estimación gruesa
+const SRC = 10; // búsqueda en la imagen ×4 (= 40 px de análisis)
+const SRC_LOST = 16; // … mientras está perdido
+const SR2 = 4; // verificación: pasada fina
+const SR2_WIDE = 10; // verificación: pasada amplia (corrige errores grandes)
 const MAX_FEATS = 70;
 const MIN_INLIERS = 8;
-const PMAX_MISSES = 6;
+const PMAX_MISSES = 45; // ~3 s a 15 muestras por segundo
+const MAX_UNVERIFIED = 8; // cuadros seguidos sin verificar contra un cuadro clave
+const KEY_EVERY = 10; // pasos mínimos entre cuadros clave
+const MAX_KEYS = 8;
+const UNIQ = 0.06; // margen mínimo entre el máximo y el segundo pico (puntos que no se repiten)
 
 /* ---------- homografías ---------- */
 export const H_ID = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -220,6 +236,22 @@ function insideQuad(q, x, y) {
   return true;
 }
 // El área achicada hacia el centro: los bordes suelen tener árboles, cercos o sombras que no están en el plano
+// Imagen reducida a la mitad (promedio 2×2): el píxel (x, y) cubre (2x, 2y)…(2x+1, 2y+1)
+function down2({ f, w, h }) {
+  const w2 = w >> 1,
+    h2 = h >> 1,
+    o = new Float32Array(w2 * h2);
+  for (let y = 0; y < h2; y++)
+    for (let x = 0; x < w2; x++) {
+      const i = 2 * y * w + 2 * x;
+      o[y * w2 + x] = (f[i] + f[i + 1] + f[i + w] + f[i + w + 1]) / 4;
+    }
+  return { f: o, w: w2, h: h2 };
+}
+const down4 = (f, w, h) => down2(down2({ f, w, h }));
+// De coordenadas ×4 a coordenadas de análisis (centro del bloque de 4×4)
+const D4 = [4, 0, 1.5, 0, 4, 1.5, 0, 0, 1],
+  D4i = [0.25, 0, -0.375, 0, 0.25, -0.375, 0, 0, 1];
 function shrink(q, k) {
   const [cx, cy] = quadCenter(q);
   return q.map((v, i) => (i % 2 ? cy + (v - cy) * k : cx + (v - cx) * k));
@@ -303,20 +335,35 @@ function goodFeatures(f, W, H, q, maxN, minD, border) {
     cell = minD,
     gw = Math.ceil(W / cell) + 1,
     taken = new Map();
-  for (const [e, x, y] of cand) {
-    if (e < mx * 0.05 || out.length >= maxN) break;
+  const tryAdd = ([e, x, y]) => {
+    if (e < mx * 0.05 || out.length >= maxN) return false;
     const gx = Math.floor(x / cell),
       gy = Math.floor(y / cell);
-    let ok = true;
-    for (let j = -1; j <= 1 && ok; j++)
-      for (let i = -1; i <= 1 && ok; i++) {
+    for (let j = -1; j <= 1; j++)
+      for (let i = -1; i <= 1; i++) {
         const p = taken.get((gy + j) * gw + gx + i);
-        if (p && (p[0] - x) ** 2 + (p[1] - y) ** 2 < minD * minD) ok = false;
+        if (p && (p[0] - x) ** 2 + (p[1] - y) ** 2 < minD * minD) return false;
       }
-    if (!ok) continue;
     taken.set(gy * gw + gx, [x, y]);
     out.push([x, y]);
+    return true;
+  };
+  // Repartidos en toda el área: primero el mejor de cada bloque (si todos quedan donde hay más contraste,
+  // la perspectiva de la parte lejana queda mal determinada), después el resto por puntaje
+  const xs = [q[0], q[2], q[4], q[6]],
+    ys = [q[1], q[3], q[5], q[7]],
+    bx0 = Math.min(...xs),
+    by0 = Math.min(...ys),
+    B = Math.max(minD * 2, Math.sqrt(((Math.max(...xs) - bx0) * (Math.max(...ys) - by0)) / (maxN * 0.5))),
+    bw = Math.ceil(W / B) + 2,
+    seen = new Set(),
+    rest = [];
+  for (const c of cand) {
+    const k = Math.floor((c[2] - by0) / B) * bw + Math.floor((c[1] - bx0) / B);
+    if (seen.has(k) || !tryAdd(c)) rest.push(c);
+    else seen.add(k);
   }
+  for (const c of rest) if (out.length < maxN) tryAdd(c);
   return out;
 }
 const N = 2 * PPR + 1,
@@ -410,7 +457,16 @@ function zncc(img, t, cx, cy, sr) {
   }
   // en el borde de la búsqueda el máximo no es confiable (puede estar más allá)
   const edge = Math.abs(bx - x0) === sr || Math.abs(by - y0) === sr;
-  return { x: fx, y: fy, s: edge ? Math.min(bs, 0) : bs };
+  // Unicidad: el mejor puntaje lejos del máximo (a 3 px o más). Si es casi igual, el punto es ambiguo
+  // (un surco, una hilera: se "desliza" a lo largo de la línea) y no debe contar.
+  let s2 = -2;
+  for (let j = 0; j < w2; j++)
+    for (let i = 0; i < w2; i++) {
+      if (Math.max(Math.abs(x0 - sr + i - bx), Math.abs(y0 - sr + j - by)) < 3) continue;
+      const v = grid[j * w2 + i];
+      if (v > s2) s2 = v;
+    }
+  return { x: fx, y: fy, s: edge ? Math.min(bs, 0) : bs, s2 };
 }
 
 export class PlanarCore {
@@ -430,11 +486,17 @@ export class PlanarCore {
     this.area0 = Math.abs(quadArea(this.q0));
     this.Qs = shrink(this.q0, 0.88);
     this.refFeats = goodFeatures(f0, W, H, this.Qs, MAX_FEATS + 20, 9, PPR + 1);
+    this.f04 = down4(f0, W, H);
+    this.key0 = { f: f0, H: H_ID, Hi: H_ID, feats: this.refFeats };
   }
   begin() {
     this.Hc = H_ID.slice();
     this.S = H_ID.slice();
     this.prev = this.f0;
+    this.prev4 = this.f04;
+    this.keys = [this.key0];
+    this.lastKey = 0;
+    this.unver = 0;
     this.misses = 0;
     this.k = 0;
   }
@@ -446,70 +508,137 @@ export class PlanarCore {
   step(f) {
     const { W, H } = this,
       img = new Integral(f, W, H),
-      rng = mulberry32(0x5eed + ++this.k);
-    const Hpred = hMul(this.S, this.Hc);
-    // 1. Cuadro a cuadro
+      c4 = down4(f, W, H),
+      img4 = new Integral(c4.f, c4.w, c4.h),
+      rng = mulberry32(0x5eed + ++this.k),
+      lost = this.misses;
+    // Movimiento previsto desde el último cuadro bueno (this.prev): el anterior, repetido por cada paso perdido
+    let Sp = this.S;
+    for (let i = 0; i < lost; i++) Sp = hMul(this.S, Sp);
     const qs = shrink(mapQuad(this.Hc, this.Q0), 0.88);
-    const feats = goodFeatures(this.prev, W, H, qs, MAX_FEATS, 9, PPR + 1);
+    // 0. Estimación gruesa (×4): «sigue igual» y «quieto» (y el último paso, si está perdido)
+    const p4 = this.prev4,
+      qs4 = qs.map(v => (v - 1.5) / 4),
+      feats4 = goodFeatures(p4.f, p4.w, p4.h, qs4, 40, 5, PPR + 1),
+      srC = lost ? SRC_LOST : SRC;
+    let best = null;
+    for (const cand of lost ? [Sp, this.S, H_ID] : [Sp, H_ID]) {
+      const ch = hMul(D4i, hMul(cand, D4)),
+        s0 = [],
+        d0 = [];
+      for (const [x, y] of feats4) {
+        const [px, py] = hApply(ch, x, y);
+        if (!(px > -srC && py > -srC && px < c4.w + srC && py < c4.h + srC)) continue;
+        const t = tplAt(p4.f, p4.w, x, y);
+        if (!t) continue;
+        const m = zncc(img4, t, px, py, srC);
+        if (m && m.s >= 0.7 && m.s - m.s2 >= UNIQ) {
+          s0.push([x, y]);
+          d0.push([m.x, m.y]);
+        }
+      }
+      const r = ransacH(s0, d0, 1, 100, rng);
+      if (r && r.inl.length >= 6 && (!best || r.inl.length > best.inl.length)) best = r;
+      if (best && best.inl.length >= feats4.length * 0.7) break;
+    }
+    const Sg = best ? hMul(D4, hMul(best.h, D4i)) : Sp;
+    // 1. Cuadro a cuadro, guiado por la estimación gruesa
+    const feats = goodFeatures(this.prev, W, H, qs, MAX_FEATS, 9, PPR + 1),
+      sr1 = best ? SR1_FINE : SR1;
     const s1 = [],
       d1 = [];
     for (const [x, y] of feats) {
-      const [px, py] = hApply(this.S, x, y);
-      if (!(px > -SR1 && py > -SR1 && px < W + SR1 && py < H + SR1)) continue;
+      const [px, py] = hApply(Sg, x, y);
+      if (!(px > -sr1 && py > -sr1 && px < W + sr1 && py < H + sr1)) continue;
       const t = tplAt(this.prev, W, x, y);
       if (!t) continue;
-      const m = zncc(img, t, px, py, SR1);
-      if (m && m.s >= 0.7) {
+      const m = zncc(img, t, px, py, sr1);
+      if (m && m.s >= 0.7 && m.s - m.s2 >= UNIQ) {
         s1.push([x, y]);
         d1.push([m.x, m.y]);
       }
     }
     const r1 = ransacH(s1, d1, 1.5, 150, rng);
     const ok1 = r1 && r1.inl.length >= MIN_INLIERS;
-    const Hest = ok1 ? hMul(r1.h, this.Hc) : Hpred;
-    // 2. Corrección contra el cuadro de las esquinas
+    const Hest = hMul(ok1 ? r1.h : Sg, this.Hc);
+    // 2. Verificación contra el último cuadro clave (y, si no alcanza, contra el de las esquinas)
     let Hnew = null,
+      verified = false,
+      ratio2 = 0,
       inl = ok1 ? r1.inl.length : 0;
-    const hi = hInv(Hest);
-    if (hi) {
-      const s2 = [],
-        d2 = [],
-        sr = ok1 ? SR2 : SR2_WIDE;
-      for (const [x, y] of this.refFeats) {
-        const [px, py] = hApply(Hest, x, y);
+    // Dos pasadas: amplia (corrige errores grandes, por ejemplo de perspectiva en la parte lejana) y fina
+    const verify = (Hg, key, sr) => {
+      const hi = hInv(Hg);
+      if (!hi) return null;
+      const wk = hMul(key.H, hi), // actual → cuadro clave
+        s2 = [],
+        d2 = [];
+      for (const [x, y] of key.feats) {
+        const P = hApply(key.Hi, x, y),
+          [px, py] = hApply(Hg, P[0], P[1]);
         if (!(px >= PPR && py >= PPR && px < W - PPR && py < H - PPR)) continue;
         // La plantilla se centra en el píxel entero más cercano: su centro corresponde a hi(rx, ry)
         const rx = Math.round(px),
           ry = Math.round(py),
-          t = tplWarp(this.f0, W, H, hi, rx, ry);
+          t = tplWarp(key.f, W, H, wk, rx, ry);
         if (!t) continue;
         const m = zncc(img, t, rx, ry, sr);
-        if (m && m.s >= 0.6) {
+        if (m && m.s >= 0.6 && m.s - m.s2 >= UNIQ) {
           s2.push(hApply(hi, rx, ry));
           d2.push([m.x, m.y]);
         }
       }
       const r2 = ransacH(s2, d2, 1.5, 150, rng);
-      if (r2 && r2.inl.length >= MIN_INLIERS && r2.inl.length >= s2.length * 0.5) {
-        Hnew = r2.h;
-        inl = Math.max(inl, r2.inl.length);
+      return r2 && r2.inl.length >= MIN_INLIERS && r2.inl.length >= s2.length * 0.5
+        ? { h: r2.h, ratio: r2.inl.length / Math.max(1, key.feats.length), n: r2.inl.length }
+        : null;
+    };
+    // primero el de las esquinas (la referencia exacta); el último cuadro clave, si ese no alcanza
+    const tryKeys = this.keys.length > 1 ? [this.key0, this.keys[this.keys.length - 1]] : [this.key0];
+    for (const key of tryKeys) {
+      const a = verify(Hest, key, SR2_WIDE),
+        v = a && (verify(a.h, key, SR2) || a);
+      if (v) {
+        Hnew = v.h;
+        verified = true;
+        ratio2 = v.ratio;
+        inl = Math.max(inl, v.n);
+        break;
       }
     }
-    if (!Hnew && ok1) Hnew = Hest;
+    // Sin verificar: solo si el paso cuadro a cuadro es muy claro, y pocos cuadros seguidos
+    const strong1 = ok1 && r1.inl.length >= 12 && r1.inl.length >= s1.length * 0.6;
+    if (!Hnew && strong1 && this.unver < MAX_UNVERIFIED) Hnew = Hest;
     let q = Hnew && mapQuad(Hnew, this.Q0);
     if (q && this.valid(q)) {
       const hc = hInv(this.Hc);
-      this.S = hc ? hMul(Hnew, hc) : H_ID.slice();
+      // Velocidad por paso: tras recuperarse no se conoce (abarcó varios pasos), se empieza quieto
+      this.S = hc && !lost ? hMul(Hnew, hc) : H_ID.slice();
       this.Hc = Hnew;
+      this.prev = f;
+      this.prev4 = c4;
       this.misses = 0;
+      this.unver = verified ? 0 : this.unver + 1;
+      // Nuevo cuadro clave: verificado, cada tanto, cuando el último ya se parece menos y con la imagen casi
+      // quieta (si se mueve rápido, el desenfoque corre la imagen y el error quedaría guardado para siempre)
+      const qp = mapQuad(this.prevH || Hnew, this.Q0),
+        still = Math.max(...q.map((v, i) => Math.abs(v - qp[i]))) < 3;
+      this.prevH = Hnew;
+      if (verified && still && this.k - this.lastKey >= KEY_EVERY && ratio2 < 0.75) {
+        const feats = goodFeatures(f, W, H, shrink(q, 0.88), MAX_FEATS + 20, 9, PPR + 1);
+        const Hi = hInv(Hnew);
+        if (Hi && feats.length >= MIN_INLIERS * 2) {
+          this.keys.push({ f, H: Hnew, Hi, feats });
+          if (this.keys.length > MAX_KEYS) this.keys.splice(1, 1); // el de las esquinas siempre queda
+          this.lastKey = this.k;
+        }
+      }
     } else {
-      // No se encontró: se sigue con el movimiento previsto unos cuadros
+      // No se encontró: se sigue buscando desde el último cuadro bueno (prev y Hc no cambian)
       this.misses++;
-      this.Hc = Hpred;
-      q = mapQuad(Hpred, this.Q0);
+      q = mapQuad(hMul(Sg, this.Hc), this.Q0);
       inl = 0;
     }
-    this.prev = f;
-    return { q, misses: this.misses, stop: this.misses > PMAX_MISSES || !this.valid(q), inl };
+    return { q, misses: this.misses, stop: this.misses > PMAX_MISSES, inl };
   }
 }
