@@ -15,6 +15,7 @@ import './export.js';
 import './actions.js';
 import './pwa.js';
 import { applyTheme } from './theme.js';
+import { initViewer } from './viewer.js';
 import './timeline-touch.js';
 
 /* ---------- arranque ---------- */
@@ -96,6 +97,7 @@ function buildDemo() {
 
 export async function init() {
   applyTheme();
+  initViewer();
   makeMini();
   if (document.fonts) document.fonts.ready.then(makeMini); // las miniaturas usan la fuente de la interfaz
   renderTabs();

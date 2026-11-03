@@ -1,6 +1,6 @@
 // Prueba de humo en Chromium (Playwright). Sin dependencias en el repo:
 //   node tests/smoke.cjs                 todo
-//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, 4esquinas, rotacion, demux)
+//   node tests/smoke.cjs tactil 2puntos  solo esas secciones (basico, tablet, tactil, audio, export, rastreo, acceso, pwa, 2puntos, 4esquinas, vista, rotacion, demux)
 // Necesita `playwright` disponible (en el entorno de la nube ya viene) y `ffmpeg` para el video de prueba.
 const { chromium } = require('playwright');
 const http = require('http');
@@ -644,6 +644,145 @@ const mods = `const st = await import('/js/state.js'), pj = await import('/js/pr
     const hb = await pc.evaluate(() => document.querySelector('#bUndo').getBoundingClientRect().height);
     check(hb < 40, `PC con mouse: diseño compacto (deshacer mide ${Math.round(hb)} px)`);
     await pc.close();
+  }
+
+  // Vista previa: cabe en su lugar con cada proporción y cada pantalla; la barra cambia su tamaño y se recuerda
+  if (run('vista')) {
+    console.log('\nVista previa (tamaño según el dispositivo)');
+    const fit = async page =>
+      page.evaluate(async () => {
+        const ac = await import('/js/actions.js'),
+          out = [];
+        for (const a of ['16:9', '9:16', '1:1']) {
+          ac.act('aspect:' + a);
+          await new Promise(r => setTimeout(r, 120));
+          const c = document.querySelector('#stage').getBoundingClientRect(),
+            v = document.querySelector('.viewer').getBoundingClientRect(),
+            [x, y] = a.split(':').map(Number);
+          const inside =
+            c.left >= v.left - 1 && c.right <= v.right + 1 && c.top >= v.top - 1 && c.bottom <= v.bottom + 1;
+          const ratio = Math.abs(c.width / c.height / (x / y) - 1) < 0.02;
+          out.push({ a, inside, ratio, w: Math.round(c.width), h: Math.round(c.height) });
+        }
+        ac.act('aspect:16:9');
+        return { out, ih: innerHeight, sw: document.documentElement.scrollWidth - innerWidth };
+      });
+    for (const [name, w, h, touch] of [
+      ['celular', 390, 700, true],
+      ['tablet vertical', 800, 1280, true],
+      ['celular acostado', 800, 360, true],
+      ['tablet horizontal', 1333, 800, true],
+      ['PC', 1280, 800, false],
+    ]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: touch, isMobile: touch });
+      const page = await ctx.newPage();
+      await page.goto(url);
+      await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+      const r = await fit(page);
+      const bad = r.out.filter(x => !x.inside || !x.ratio);
+      check(
+        !bad.length && r.sw <= 0,
+        `${name}: la vista previa cabe en su lugar en 16:9, 9:16 y 1:1 (${r.out.map(x => `${x.w}×${x.h}`).join(', ')})`
+      );
+      if (name === 'celular') {
+        const tall = r.out.find(x => x.a === '9:16');
+        check(tall.h >= r.ih * 0.4, `celular: un video vertical se ve grande (${tall.h} px de ${r.ih})`);
+      }
+      if (name === 'celular acostado') {
+        const play = await page.$eval('#bPlay', e => e.getBoundingClientRect().bottom <= innerHeight);
+        check(play, 'celular acostado: la vista previa y los controles entran sin desplazar');
+      }
+      if (touch) {
+        const hit = await page.evaluate(() => {
+          const g = document.querySelector('#pvGrip');
+          g.scrollIntoView({ block: 'center' });
+          const b = g.getBoundingClientRect(),
+            x = b.left + b.width / 2;
+          return [-18, 0, 18].every(dy => document.elementFromPoint(x, b.top + b.height / 2 + dy) === g);
+        });
+        check(hit, `${name}: la barra de tamaño se toca en 44 px de alto`);
+      }
+      await ctx.close();
+    }
+    // Arrastrar la barra con el dedo (celular): la vista previa crece, se recuerda al recargar y Enter la restablece
+    {
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 700 }, hasTouch: true, isMobile: true });
+      const page = await ctx.newPage();
+      await page.goto(url);
+      // (el rastreo automático del ejemplo debe terminar: mientras corre no se guarda)
+      await until(page, async () => {
+        const { S } = await import('/js/state.js');
+        return S.clips.length === 3 && !S.tracking;
+      });
+      await page.evaluate(async () => (await import('/js/actions.js')).act('aspect:9:16'));
+      await page.waitForTimeout(150);
+      const ch = () => page.$eval('#stage', e => Math.round(e.getBoundingClientRect().height));
+      const h0 = await ch();
+      const g = await page.$eval('#pvGrip', e => {
+        const b = e.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      const cdp = await ctx.newCDPSession(page);
+      const tp = (type, y) =>
+        cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: g.x, y, id: 1 }] });
+      await tp('touchStart', g.y);
+      for (let k = 1; k <= 8; k++) {
+        await tp('touchMove', g.y + k * 10);
+        await page.waitForTimeout(20);
+      }
+      await tp('touchEnd');
+      await page.waitForTimeout(100);
+      const h1 = await ch();
+      await page.evaluate(async () => (await import('/js/project.js')).saveNow());
+      await page.reload();
+      await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+      await page.waitForTimeout(150);
+      const h2 = await ch();
+      await page.focus('#pvGrip');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(100);
+      const h3 = await ch();
+      check(
+        h1 >= h0 + 40 && Math.abs(h2 - h1) <= 2 && Math.abs(h3 - h0) <= 2,
+        `celular: arrastrar la barra agranda la vista previa (${h0} → ${h1} px), se recuerda (${h2}) y Enter la restablece (${h3})`
+      );
+      await ctx.close();
+    }
+    // PC: arrastrar con el mouse achica la línea de tiempo y agranda la vista previa; con el teclado también
+    {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      await page.goto(url);
+      await until(page, async () => (await import('/js/state.js')).S.clips.length === 3);
+      await page.evaluate(async () => (await import('/js/actions.js')).act('aspect:9:16'));
+      await page.waitForTimeout(150);
+      const st = () =>
+        page.evaluate(() => ({
+          c: Math.round(document.querySelector('#stage').getBoundingClientRect().height),
+          tl: Math.round(document.querySelector('.tl').getBoundingClientRect().height),
+        }));
+      const a = await st();
+      const g = await page.$eval('#pvGrip', e => {
+        const b = e.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      await page.mouse.move(g.x, g.y);
+      await page.mouse.down();
+      await page.mouse.move(g.x, g.y + 60, { steps: 6 });
+      await page.mouse.up();
+      await page.waitForTimeout(100);
+      const b = await st();
+      await page.focus('#pvGrip');
+      await page.keyboard.press('ArrowUp');
+      await page.keyboard.press('ArrowUp');
+      await page.waitForTimeout(100);
+      const c = await st();
+      check(
+        b.tl <= a.tl - 50 && b.c >= a.c + 50 && c.tl > b.tl && c.c < b.c,
+        `PC: la barra cambia el reparto entre vista previa y línea de tiempo (${a.c} → ${b.c} px; teclado: ${c.c} px)`
+      );
+      await page.evaluate(() => localStorage.removeItem('rastro.pv'));
+      await page.close();
+    }
   }
 
   // Línea de tiempo táctil: gestos con mouse y con dedos reales (eventos táctiles del protocolo de Chrome)
